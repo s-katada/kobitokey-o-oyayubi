@@ -1903,7 +1903,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 95.25 120.65 0)
 			(effects
 				(font
@@ -1973,7 +1973,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 95.25 110.49 0)
 			(effects
 				(font
@@ -2059,7 +2059,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 120.65 93.98 0)
 			(effects
 				(font
@@ -2127,7 +2127,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 107.95 67.31 0)
 			(effects
 				(font
@@ -2197,7 +2197,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 133.35 83.82 0)
 			(effects
 				(font
@@ -2285,7 +2285,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Connector_FFC-FPC:Hirose_FH12-10S-0.5SH_1x10-1MP_P0.50mm_Horizontal"
 			(at 210.82 82.55 0)
 			(effects
 				(font
@@ -2379,7 +2379,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 107.95 83.82 0)
 			(effects
 				(font
@@ -2465,7 +2465,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 107.95 120.65 0)
 			(effects
 				(font
@@ -2533,7 +2533,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 95.25 67.31 0)
 			(effects
 				(font
@@ -2603,7 +2603,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 120.65 57.15 0)
 			(effects
 				(font
@@ -2689,7 +2689,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 133.35 93.98 0)
 			(effects
 				(font
@@ -2759,7 +2759,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 133.35 57.15 0)
 			(effects
 				(font
@@ -2847,7 +2847,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 95.25 83.82 0)
 			(effects
 				(font
@@ -2935,7 +2935,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 120.65 110.49 0)
 			(effects
 				(font
@@ -3021,7 +3021,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 95.25 93.98 0)
 			(effects
 				(font
@@ -3089,7 +3089,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 120.65 67.31 0)
 			(effects
 				(font
@@ -3226,7 +3226,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 107.95 57.15 0)
 			(effects
 				(font
@@ -3314,7 +3314,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 120.65 83.82 0)
 			(effects
 				(font
@@ -3400,7 +3400,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 146.05 67.31 0)
 			(effects
 				(font
@@ -3470,7 +3470,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 95.25 57.15 0)
 			(effects
 				(font
@@ -3556,7 +3556,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 107.95 93.98 0)
 			(effects
 				(font
@@ -3692,7 +3692,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 107.95 110.49 0)
 			(effects
 				(font
@@ -3780,7 +3780,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 146.05 83.82 0)
 			(effects
 				(font
@@ -3868,7 +3868,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 146.05 110.49 0)
 			(effects
 				(font
@@ -3954,7 +3954,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 120.65 120.65 0)
 			(effects
 				(font
@@ -4024,7 +4024,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 146.05 57.15 0)
 			(effects
 				(font
@@ -4110,7 +4110,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 146.05 93.98 0)
 			(effects
 				(font
@@ -4178,7 +4178,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 146.05 120.65 0)
 			(effects
 				(font
@@ -4246,7 +4246,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 133.35 120.65 0)
 			(effects
 				(font
@@ -4314,7 +4314,7 @@
 				)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "PCM_Switch_Keyboard_Hotswap_Kailh:SW_Hotswap_Kailh_Choc_V1V2_1.00u"
 			(at 133.35 67.31 0)
 			(effects
 				(font
@@ -4450,7 +4450,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 133.35 110.49 0)
 			(effects
 				(font
