@@ -1,0 +1,4 @@
+"ID";"指定子";"フットプリント";"数量";"名称";"供給業者、参考資料";
+1;"SW6,SW14,SW11,SW9,SW8,SW7,SW15,SW1,SW5,SW4,SW3,SW13,SW12,SW2,SW10";"SW_Hotswap_Kailh_Choc_V2_1.00u";15;"SW_Push";;;
+2;"D11,D15,D10,D9,D5,D2,D7,D1,D14,D13,D3,D12,D6,D4,D8";"D_SOD-123";15;"D";;;
+3;"J1";"Hirose_FH12-10S-0.5SH_1x10-1MP_P0.50mm_Horizontal";1;"Conn_01x10";;;

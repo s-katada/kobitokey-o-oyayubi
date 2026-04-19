@@ -1,0 +1,21 @@
+### Footprint positions - created on 2026-04-20T01:20:04+0900 ###
+### Printed by KiCad version 9.0.7
+## Unit = mm, Angle = deg.
+## Side : top
+# Ref     Val       Package                              PosX       PosY       Rot  Side
+SW1       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   198.0000   -91.5000  -90.0000  top
+SW2       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   182.0000   -89.5000    0.0000  top
+SW3       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   166.0000   -87.5000  -90.0000  top
+SW4       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   150.0000   -91.5000  -90.0000  top
+SW5       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   134.0000   -99.5000  -90.0000  top
+SW6       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   198.0000  -107.5000  -90.0000  top
+SW7       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   182.0000  -105.5000  -90.0000  top
+SW8       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   166.0000  -103.5000  -90.0000  top
+SW9       SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   150.0000  -107.5000  -90.0000  top
+SW10      SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   134.0000  -115.5000  -90.0000  top
+SW11      SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   198.0000  -123.5000   90.0000  top
+SW12      SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   182.0000  -121.5000   90.0000  top
+SW13      SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   166.0000  -119.5000   90.0000  top
+SW14      SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   150.0000  -123.5000   90.0000  top
+SW15      SW_Push   SW_Hotswap_Kailh_Choc_V2_1.00u   134.0000  -131.5000   90.0000  top
+## End
