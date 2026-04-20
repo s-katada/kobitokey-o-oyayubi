@@ -19315,6 +19315,7 @@
 		(property "Reference" "D9"
 			(at 0 2 0)
 			(layer "B.SilkS")
+			(hide yes)
 			(uuid "3e1325a1-abe7-47d0-af3e-153c6f041912")
 			(effects
 				(font
@@ -19576,18 +19577,6 @@
 			)
 			(layer "B.Fab")
 			(uuid "c8c8daf1-449e-47b4-8c23-3a31effc0ae9")
-		)
-		(fp_text user "${REFERENCE}"
-			(at 0 2 0)
-			(layer "B.Fab")
-			(uuid "e0dc6689-00b4-4c19-b776-435c1b569f43")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-				(justify mirror)
-			)
 		)
 		(pad "1" smd roundrect
 			(at -1.65 0 180)
@@ -20241,6 +20230,7 @@
 		(property "Reference" "D7"
 			(at 0 2 0)
 			(layer "B.SilkS")
+			(hide yes)
 			(uuid "27b0db52-d6eb-43be-bf4b-a8a2538d6bac")
 			(effects
 				(font
@@ -20502,18 +20492,6 @@
 			)
 			(layer "B.Fab")
 			(uuid "2ae1fece-26ec-43a1-8484-b498abf5ea91")
-		)
-		(fp_text user "${REFERENCE}"
-			(at 0 2 0)
-			(layer "B.Fab")
-			(uuid "338279d5-8fdd-4415-a498-0bc84733e864")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-				(justify mirror)
-			)
 		)
 		(pad "1" smd roundrect
 			(at -1.65 0 180)
@@ -22094,6 +22072,7 @@
 		(property "Reference" "D6"
 			(at 0 2 0)
 			(layer "B.SilkS")
+			(hide yes)
 			(uuid "601d0126-be98-4e42-b5eb-62a901734ec0")
 			(effects
 				(font
@@ -22355,18 +22334,6 @@
 			)
 			(layer "B.Fab")
 			(uuid "6c27053c-457e-459e-bb0d-70ee3f9431a2")
-		)
-		(fp_text user "${REFERENCE}"
-			(at 0 2 0)
-			(layer "B.Fab")
-			(uuid "519ad95b-1a6f-44f2-89f9-c99acaa43ec5")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-				(justify mirror)
-			)
 		)
 		(pad "1" smd roundrect
 			(at -1.65 0 180)
