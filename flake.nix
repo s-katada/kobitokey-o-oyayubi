@@ -39,9 +39,19 @@
             pkgs.cargo-generate
             pkgs.pkg-config
             pkgs.libusb1
+            # Required by bindgen (used by nrf-mpsl-sys through rmk).
+            pkgs.llvmPackages.libclang
+            pkgs.clang
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.systemd
           ];
+
+          env = {
+            # Tell bindgen which libclang to load. Without this it falls back
+            # to the host system libclang which on GitHub runners lacks a
+            # compatible libstdc++.
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+          };
 
           shellHook = ''
             echo "kobitokey-o-oyayubi devshell ready"
