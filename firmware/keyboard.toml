@@ -3,12 +3,13 @@
 # Hardware: split keyboard with two XIAO nRF52840 BLE modules (one on each
 # thumb-unit PCB). Each side has a 4x5 matrix (15 keys on main-unit + 5 keys
 # on thumb-unit, sharing ROW0..ROW3 / COL0..COL4 via the FH12-10S 10-pin FFC).
-# Diode direction is col2row (default).
+# Diode direction is col2row (default). Each thumb PCB also carries a PMW3610
+# optical trackball sensor (single-wire SDIO).
 #
 # Pin assignments below are derived from the KiCad schematic at
 # thumb-unit-left.kicad_sch. XIAO pins (silk name | XIAO#):
-#   D0 (P0_02, pin1)  -> SDIO   (trackball SPI data)
-#   D1 (P0_03, pin2)  -> SCLK   (trackball SPI clock)
+#   D0 (P0_02, pin1)  -> SDIO   (trackball, bidirectional data)
+#   D1 (P0_03, pin2)  -> SCLK   (trackball clock)
 #   D2 (P0_28, pin3)  -> MOTION (trackball IRQ, active low)
 #   D3 (P0_29, pin4)  -> ROW0
 #   D4 (P0_04, pin5)  -> ROW1
@@ -18,8 +19,8 @@
 #   D8 (P1_13, pin9)  -> COL2
 #   D9 (P1_14, pin10) -> COL1
 #   D10(P1_15, pin11) -> COL0
-#   NFC1(P0_09)       -> COL4  (back-side pad)
-#   NFC2(P0_10)       -> NCS   (trackball chip-select, back-side pad)
+#   NFC2(P0_10)       -> COL4  (back-side pad, NFC disabled in firmware)
+#   NFC1(P0_09)       -> NCS   (trackball chip-select, back-side pad)
 # The mapping needs final confirmation by opening eeschema and checking wire
 # routes visually; update this file if any pin differs.
 
@@ -84,7 +85,17 @@ col_offset = 5
 
 [split.central.matrix]
 row_pins = ["P0_29", "P0_04", "P0_05", "P1_11"]
-col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_09"]
+col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_10"]
+
+# Trackball on the right (central) thumb unit.
+[[split.central.input_device.pmw3610]]
+name = "trackball_r"
+id = 0
+spi = { instance = "bitbang0", sck = "P0_03", mosi = "P0_02", miso = "P0_02", cs = "P0_09" }
+motion = "P0_28"
+report_hz = 125
+cpi = 800
+smart_mode = true
 
 # Left half = peripheral 0. Keys occupy cols 0..4.
 [[split.peripheral]]
@@ -95,7 +106,19 @@ col_offset = 0
 
 [split.peripheral.matrix]
 row_pins = ["P0_29", "P0_04", "P0_05", "P1_11"]
-col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_09"]
+col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_10"]
+
+# Trackball on the left (peripheral) thumb unit.
+[[split.peripheral.input_device.pmw3610]]
+name = "trackball_l"
+id = 1
+spi = { instance = "bitbang0", sck = "P0_03", mosi = "P0_02", miso = "P0_02", cs = "P0_09" }
+motion = "P0_28"
+report_hz = 125
+cpi = 800
+smart_mode = true
+# Mirror horizontal axis so both trackballs move the cursor the same way.
+invert_x = true
 
 [rmk]
 split_peripherals_num = 1
