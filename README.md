@@ -1,16 +1,19 @@
 # kobitokey-o-oyayubi
 
-自作分割キーボード「kobitokey」の親指ユニット付きバージョンの KiCad プロジェクトです。
+自作分割キーボード「kobitokey」の親指ユニット付きバージョンの KiCad プロジェクトとファームウェアです。
 
 ## 概要
 
-左右分割型のキーボードで、メインユニットと親指ユニットで構成されています。Kailh Choc V2 ホットスワップソケットを使用し、PCB は JLCPCB で製造しています。
+左右分割型のキーボードで、メインユニットと親指ユニットで構成されています。Kailh Choc V2 ホットスワップソケットを使用し、PCB は JLCPCB で製造しています。親指ユニット上には Seeed XIAO nRF52840 BLE と PMW3610 光学トラックボールセンサーが搭載されており、左右それぞれ独立して BLE で通信します。
 
 ## 構成
 
 - `main-unit-left/` / `main-unit-right/` — メインユニット（左右）の KiCad プロジェクト
 - `thumb-unit-left/` / `thumb-unit-right/` — 親指ユニット（左右）の KiCad プロジェクト
 - `main-unit.csv` — メインユニットの部品表（BOM）
+- `case/`, `dxf/`, `*.stl` — ケース・プレート類の CAD データ
+- `firmware/` — Rust 製ファームウェア（[RMK](https://github.com/HaoboGu/rmk) ベース）
+- `flake.nix`, `.envrc` — Nix flake と direnv による開発環境定義
 
 各ユニットディレクトリには以下が含まれます。
 
@@ -23,3 +26,73 @@
 - スイッチ: Kailh Choc V2 ホットスワップ（1.00u）
 - ダイオード: SOD-123
 - コネクタ: Hirose FH12-10S-0.5SH（FFC/FPC 10 ピン, 0.5mm ピッチ）
+- MCU: Seeed XIAO nRF52840 BLE（左右親指ユニットに 1 個ずつ）
+- トラックボール: PMW3610 光学センサー（左右親指ユニットに 1 個ずつ、3 線 SPI）
+
+## 開発環境セットアップ
+
+[Nix](https://nixos.org/) と [direnv](https://direnv.net/) がインストール済み前提です。
+
+```fish
+direnv allow
+```
+
+`direnv allow` すると `flake.nix` に定義された devshell が自動で起動し、Rust ツールチェイン（`thumbv7em-none-eabihf` ターゲット付き）、`flip-link`、`probe-rs`、`cargo-binutils`、`libusb1` などが揃います。Nix を使わない場合は手動で `rustup target add thumbv7em-none-eabihf` してください。
+
+devshell 初回起動時は `rmkit` と `uf2conv` のインストールを促すメッセージが出ます:
+
+```fish
+cargo install --locked rmkit uf2conv
+```
+
+## ファームウェア
+
+`firmware/` 以下が RMK ベースのファームウェアです。左右の XIAO nRF52840 BLE が `central`（右）と `peripheral`（左）として BLE で結合し、ホスト PC にも BLE 1 本でワイヤレス接続します。
+
+### 構成
+
+- 片側 4 行 × 5 列マトリクス（メイン 15 キー + 親指 5 キー）、両側合計 40 キー
+- BLE split (右 central / 左 peripheral 0)
+- BLE wireless host connection
+- レイヤ 4 枚（Base / Symbol / Navigation / System-BT）
+- PMW3610 トラックボール両側対応
+
+### ビルド
+
+devshell 内で:
+
+```fish
+cd firmware
+cargo build --release --bin central
+cargo build --release --bin peripheral
+```
+
+ELF → UF2 変換:
+
+```fish
+cargo objcopy --release --bin central     -- -O ihex central.hex
+cargo objcopy --release --bin peripheral  -- -O ihex peripheral.hex
+uf2conv central.hex    -f 0xADA52840 -co central.uf2
+uf2conv peripheral.hex -f 0xADA52840 -co peripheral.uf2
+```
+
+### 書込
+
+XIAO nRF52840 には Adafruit UF2 bootloader が書かれています。RST ボタンを素早く 2 回押すと `XIAO-BOOT` ドライブとしてマスストレージマウントされるので、対応する `.uf2` をドラッグ＆ドロップで書き込みます。
+
+- 右ユニット → `central.uf2`
+- 左ユニット → `peripheral.uf2`
+
+### デバッグ
+
+`probe-rs` + J-Link / DAPLink で SWD デバッグ・RTT ログ観察が可能です。
+
+```fish
+cargo run --release --bin central
+```
+
+`.cargo/config.toml` の `runner = "probe-rs run --chip nRF52840_xxAA"` が効きます。
+
+### キーマップ変更
+
+`firmware/keyboard.toml` の `[layout] keymap` を編集して再ビルドすると反映されます。Vial による実機エディットに対応させる場合は `firmware/vial.json` を整備してください。
