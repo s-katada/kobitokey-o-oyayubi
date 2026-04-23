@@ -1,8 +1,11 @@
 # kobitokey-o-oyayubi firmware configuration.
 #
 # Hardware: split keyboard with two XIAO nRF52840 BLE modules (one on each
-# thumb-unit PCB). Each side has a 4x5 matrix (15 keys on main-unit + 5 keys
+# thumb-unit PCB). Each side has a 4x5 matrix (15 keys on main-unit + 4 keys
 # on thumb-unit, sharing ROW0..ROW3 / COL0..COL4 via the FH12-10S 10-pin FFC).
+# Row 3 only uses COL0..COL3; the COL4 cell is intentionally empty. The thumb
+# unit's fifth switch (SW1) is a slide switch (MSK-12D19) wired as the
+# physical power cutoff, not a matrix key.
 # Diode direction is col2row (default). Each thumb PCB also carries a PMW3610
 # optical trackball sensor (single-wire SDIO).
 #
@@ -36,8 +39,10 @@ chip = "nrf52840"
 rows = 4
 cols = 10
 layers = 4
-# Layout is a 40-key 4x10 split. Left half occupies cols 0..4, right half 5..9.
-# Row 0..2 are the 3x5 main-unit keys on each side, row 3 is the 5 thumb keys.
+# Layout is a 38-key 4x10 split. Left half occupies cols 0..4, right half 5..9.
+# Row 0..2 are the 3x5 main-unit keys on each side; row 3 has 4 thumb keys
+# per side on cols 0..3 (left) / 5..8 (right). The COL4 slots on row 3
+# (cols 4 and 9) are permanently "No" because no switch is wired there.
 # Layers: 0 = Base (QWERTY), 1 = Symbol, 2 = Navigation, 3 = System / BT.
 keymap = [
     # --- Layer 0: Base (QWERTY) ---
@@ -45,7 +50,7 @@ keymap = [
         ["Q",    "W",    "E",    "R",    "T",         "Y",    "U",    "I",    "O",    "P"],
         ["A",    "S",    "D",    "F",    "G",         "H",    "J",    "K",    "L",    "Semicolon"],
         ["Z",    "X",    "C",    "V",    "B",         "N",    "M",    "Comma","Dot",  "Slash"],
-        ["LCtrl","LAlt", "LGui", "MO(2)","Space",     "Enter","MO(1)","RShift","RAlt","RCtrl"],
+        ["LCtrl","LAlt", "MO(2)","Space","No",        "Enter","MO(1)","RShift","RAlt","No"],
     ],
     # --- Layer 1: Symbol (numbers and shifted symbols) ---
     [
