@@ -13,9 +13,3 @@
 ## キーマップ
 
 ![keymap](firmware/keymap/kobitokey-o-oyayubi.svg)
-
-4 層構成（Layer0 / Layer1 / Layer2 / Layer3）。`firmware/keyboard.toml` の `[layout] keymap` を編集して再ビルドすると実機に反映されます。ドキュメント側の SVG を更新したい場合は、`firmware/keymap/kobitokey-o-oyayubi.yaml` を編集して devshell 内で以下を実行してください。
-
-```fish
-keymap draw firmware/keymap/kobitokey-o-oyayubi.yaml > firmware/keymap/kobitokey-o-oyayubi.svg
-```
