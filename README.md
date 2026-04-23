@@ -8,14 +8,16 @@
 
 ## 構成
 
-- `main-unit-left/` / `main-unit-right/` — メインユニット（左右）の KiCad プロジェクト
-- `thumb-unit-left/` / `thumb-unit-right/` — 親指ユニット（左右）の KiCad プロジェクト
-- `main-unit.csv` — メインユニットの部品表（BOM）
-- `case/`, `dxf/`, `*.stl` — ケース・プレート類の CAD データ
+- `pcb/` — KiCad で作成した回路・基板データ
+  - `main-unit-left/` / `main-unit-right/` — メインユニット（左右）の KiCad プロジェクト
+  - `thumb-unit-left/` / `thumb-unit-right/` — 親指ユニット（左右）の KiCad プロジェクト
+  - `main-unit.csv` — メインユニットの部品表（BOM）
+  - `dxf/` — Edge.Cuts から書き出した基板外形 DXF（ケース設計用）
+- `case/` — Fusion 360 で作成したキーボードケース・プレートの 3D モデル（STL）
 - `firmware/` — Rust 製ファームウェア（[RMK](https://github.com/HaoboGu/rmk) ベース）
 - `flake.nix`, `.envrc` — Nix flake と direnv による開発環境定義
 
-各ユニットディレクトリには以下が含まれます。
+各 KiCad ユニットディレクトリには以下が含まれます。
 
 - `*.kicad_pro` / `*.kicad_sch` / `*.kicad_pcb` — KiCad プロジェクト・回路図・基板データ
 - `production/` — JLCPCB 発注用の製造データ（ガーバー等）
