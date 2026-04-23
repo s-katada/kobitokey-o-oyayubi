@@ -1,5 +1,27 @@
-# Placeholder configuration. Real matrix, pin map and keymap are filled in
-# by subsequent commits (see plan steps 3-5).
+# kobitokey-o-oyayubi firmware configuration.
+#
+# Hardware: split keyboard with two XIAO nRF52840 BLE modules (one on each
+# thumb-unit PCB). Each side has a 4x5 matrix (15 keys on main-unit + 5 keys
+# on thumb-unit, sharing ROW0..ROW3 / COL0..COL4 via the FH12-10S 10-pin FFC).
+# Diode direction is col2row (default).
+#
+# Pin assignments below are derived from the KiCad schematic at
+# thumb-unit-left.kicad_sch. XIAO pins (silk name | XIAO#):
+#   D0 (P0_02, pin1)  -> SDIO   (trackball SPI data)
+#   D1 (P0_03, pin2)  -> SCLK   (trackball SPI clock)
+#   D2 (P0_28, pin3)  -> MOTION (trackball IRQ, active low)
+#   D3 (P0_29, pin4)  -> ROW0
+#   D4 (P0_04, pin5)  -> ROW1
+#   D5 (P0_05, pin6)  -> ROW2
+#   D6 (P1_11, pin7)  -> ROW3
+#   D7 (P1_12, pin8)  -> COL3
+#   D8 (P1_13, pin9)  -> COL2
+#   D9 (P1_14, pin10) -> COL1
+#   D10(P1_15, pin11) -> COL0
+#   NFC1(P0_09)       -> COL4  (back-side pad)
+#   NFC2(P0_10)       -> NCS   (trackball chip-select, back-side pad)
+# The mapping needs final confirmation by opening eeschema and checking wire
+# routes visually; update this file if any pin differs.
 
 [keyboard]
 name = "kobitokey-o-oyayubi"
@@ -46,6 +68,7 @@ enabled = true
 [split]
 connection = "ble"
 
+# Right half = central. Keys occupy cols 5..9 of the unified 4x10 layout.
 [split.central]
 rows = 4
 cols = 5
@@ -53,10 +76,10 @@ row_offset = 0
 col_offset = 5
 
 [split.central.matrix]
-# TODO: confirm exact XIAO pin -> nRF52 GPIO mapping from schematic
-row_pins = ["P0_02", "P0_03", "P0_28", "P0_29"]
-col_pins = ["P0_04", "P0_05", "P1_11", "P1_12", "P1_13"]
+row_pins = ["P0_29", "P0_04", "P0_05", "P1_11"]
+col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_09"]
 
+# Left half = peripheral 0. Keys occupy cols 0..4.
 [[split.peripheral]]
 rows = 4
 cols = 5
@@ -64,9 +87,8 @@ row_offset = 0
 col_offset = 0
 
 [split.peripheral.matrix]
-# TODO: confirm exact XIAO pin -> nRF52 GPIO mapping from schematic
-row_pins = ["P0_02", "P0_03", "P0_28", "P0_29"]
-col_pins = ["P0_04", "P0_05", "P1_11", "P1_12", "P1_13"]
+row_pins = ["P0_29", "P0_04", "P0_05", "P1_11"]
+col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_09"]
 
 [rmk]
 split_peripherals_num = 1
