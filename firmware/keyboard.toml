@@ -1,11 +1,13 @@
 # kobitokey-o-oyayubi firmware configuration.
 #
 # Hardware: split keyboard with two XIAO nRF52840 BLE modules (one on each
-# thumb-unit PCB). Each side has a 4x5 matrix (15 keys on main-unit + 4 keys
-# on thumb-unit, sharing ROW0..ROW3 / COL0..COL4 via the FH12-10S 10-pin FFC).
-# Row 3 only uses COL0..COL3; the COL4 cell is intentionally empty. The thumb
-# unit's fifth switch (SW1) is a slide switch (MSK-12D19) wired as the
+# thumb-unit PCB). Each side has a 4x5 scan matrix covering 15 main-unit
+# switches (rows 0..2) and 4 thumb-unit switches on row 3 at COL0..COL3.
+# Row 3 x COL4 has no switch wired on the PCB. The thumb unit's fifth
+# silk-labeled switch (SW1) is an MSK-12D19 slide switch acting as the
 # physical power cutoff, not a matrix key.
+# ROW/COL nets are shared between main and thumb boards via the FH12-10S
+# 10-pin FFC connector (J1).
 # Diode direction is col2row (default). Each thumb PCB also carries a PMW3610
 # optical trackball sensor (single-wire SDIO).
 #
@@ -41,8 +43,8 @@ cols = 10
 layers = 4
 # Layout is a 38-key 4x10 split. Left half occupies cols 0..4, right half 5..9.
 # Row 0..2 are the 3x5 main-unit keys on each side; row 3 has 4 thumb keys
-# per side on cols 0..3 (left) / 5..8 (right). The COL4 slots on row 3
-# (cols 4 and 9) are permanently "No" because no switch is wired there.
+# per side on cols 0..3 (left) / 5..8 (right). Cols 4 and 9 of row 3 have
+# no switch on the PCB, so the keymap entries there are "No" and never fire.
 # Layers: 0 = Base (QWERTY), 1 = Symbol, 2 = Navigation, 3 = System / BT.
 keymap = [
     # --- Layer 0: Base (QWERTY) ---

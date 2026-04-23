@@ -53,7 +53,7 @@ cargo install --locked rmkit uf2conv
 
 ### 構成
 
-- 片側 4 行 × 5 列マトリクス（メイン 15 キー + 親指 4 キー、1 セル未使用）、両側合計 38 キー
+- 片側 4 行 × 5 列マトリクス上にメイン 15 キー + 親指 4 キー、両側合計 38 キー
 - BLE split (右 central / 左 peripheral 0)
 - BLE wireless host connection
 - レイヤ 4 枚（Base / Symbol / Navigation / System-BT）
