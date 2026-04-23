@@ -45,30 +45,31 @@ layers = 4
 # Row 0..2 are the 3x5 main-unit keys on each side; row 3 has 4 thumb keys
 # per side on cols 0..3 (left) / 5..8 (right). Cols 4 and 9 of row 3 have
 # no switch on the PCB, so the keymap entries there are "No" and never fire.
-# Layers: 0 = Base (QWERTY), 1 = Symbol, 2 = Navigation, 3 = System / BT.
+# Layers: Layer0 = Base QWERTY, Layer1 = symbols/numbers, Layer2 = nav/Fn,
+# Layer3 = system (reserved).
 keymap = [
-    # --- Layer 0: Base (QWERTY) ---
+    # --- Layer0: Base (QWERTY) ---
     [
         ["Q",    "W",    "E",    "R",    "T",         "Y",    "U",    "I",    "O",    "P"],
         ["A",    "S",    "D",    "F",    "G",         "H",    "J",    "K",    "L",    "Semicolon"],
         ["Z",    "X",    "C",    "V",    "B",         "N",    "M",    "Comma","Dot",  "Slash"],
         ["LCtrl","LAlt", "MO(2)","Space","No",        "Enter","MO(1)","RShift","RAlt","No"],
     ],
-    # --- Layer 1: Symbol (numbers and shifted symbols) ---
+    # --- Layer1: Symbol (numbers and shifted symbols) ---
     [
         ["Kc1",  "Kc2",  "Kc3",  "Kc4",  "Kc5",       "Kc6",  "Kc7",  "Kc8",  "Kc9",  "Kc0"],
         ["Minus","Equal","LeftBracket","RightBracket","Backslash",  "Grave","Quote","No","No","No"],
         ["No",   "No",   "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["_",    "_",    "_",    "_",    "_",         "_",    "_",    "_",    "_",    "_"],
     ],
-    # --- Layer 2: Navigation / Function ---
+    # --- Layer2: Navigation / Function ---
     [
         ["F1",   "F2",   "F3",   "F4",   "F5",        "F6",   "F7",   "F8",   "F9",   "F10"],
         ["Home", "PageUp","PageDown","End","Insert",  "Left", "Down", "Up",   "Right","Delete"],
         ["F11",  "F12",  "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["_",    "_",    "_",    "_",    "_",         "_",    "_",    "_",    "_",    "_"],
     ],
-    # --- Layer 3: System (placeholder; RMK does not expose BLE profile keys
+    # --- Layer3: System (placeholder; RMK does not expose BLE profile keys
     # as standard keycodes, so assign as needed via custom Rust handlers) ---
     [
         ["No",   "No",   "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
