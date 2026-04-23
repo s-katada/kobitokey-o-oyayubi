@@ -42,6 +42,8 @@
             # Required by bindgen (used by nrf-mpsl-sys through rmk).
             pkgs.llvmPackages.libclang
             pkgs.clang
+            # Render keymap SVG from firmware/keymap/*.yaml.
+            pkgs.python3Packages.keymap-drawer
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.systemd
           ];
