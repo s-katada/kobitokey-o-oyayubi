@@ -6,23 +6,6 @@
 
 左右分割型のキーボードで、メインユニットと親指ユニットで構成されています。Kailh Choc V2 ホットスワップソケットを使用し、PCB は JLCPCB で製造しています。親指ユニット上には Seeed XIAO nRF52840 BLE と PMW3610 光学トラックボールセンサーが搭載されており、左右それぞれ独立して BLE で通信します。
 
-## 構成
-
-- `pcb/` — KiCad で作成した回路・基板データ
-  - `main-unit-left/` / `main-unit-right/` — メインユニット（左右）の KiCad プロジェクト
-  - `thumb-unit-left/` / `thumb-unit-right/` — 親指ユニット（左右）の KiCad プロジェクト
-  - `main-unit.csv` — メインユニットの部品表（BOM）
-  - `dxf/` — Edge.Cuts から書き出した基板外形 DXF（ケース設計用）
-- `case/` — Fusion 360 で作成したキーボードケース・プレートの 3D モデル（STL）
-- `firmware/` — Rust 製ファームウェア（[RMK](https://github.com/HaoboGu/rmk) ベース）
-- `flake.nix`, `.envrc` — Nix flake と direnv による開発環境定義
-
-各 KiCad ユニットディレクトリには以下が含まれます。
-
-- `*.kicad_pro` / `*.kicad_sch` / `*.kicad_pcb` — KiCad プロジェクト・回路図・基板データ
-- `production/` — JLCPCB 発注用の製造データ（ガーバー等）
-- `fabrication-toolkit-options.json` — Fabrication Toolkit の設定
-
 ## 主要部品
 
 - スイッチ: Kailh Choc V2 ホットスワップ（1.00u）
@@ -31,33 +14,9 @@
 - MCU: Seeed XIAO nRF52840 BLE（左右親指ユニットに 1 個ずつ）
 - トラックボール: PMW3610 光学センサー（左右親指ユニットに 1 個ずつ、3 線 SPI）
 
-## 開発環境セットアップ
-
-[Nix](https://nixos.org/) と [direnv](https://direnv.net/) がインストール済み前提です。
-
-```fish
-direnv allow
-```
-
-`direnv allow` すると `flake.nix` に定義された devshell が自動で起動し、Rust ツールチェイン（`thumbv7em-none-eabihf` ターゲット付き）、`flip-link`、`probe-rs`、`cargo-binutils`、`libusb1` などが揃います。Nix を使わない場合は手動で `rustup target add thumbv7em-none-eabihf` してください。
-
-devshell 初回起動時は `rmkit` と `uf2conv` のインストールを促すメッセージが出ます:
-
-```fish
-cargo install --locked rmkit uf2conv
-```
-
 ## ファームウェア
 
 `firmware/` 以下が RMK ベースのファームウェアです。左右の XIAO nRF52840 BLE が `central`（右）と `peripheral`（左）として BLE で結合し、ホスト PC にも BLE 1 本でワイヤレス接続します。
-
-### 構成
-
-- 片側 4 行 × 5 列マトリクス上にメイン 15 キー + 親指 4 キー、両側合計 38 キー
-- BLE split (右 central / 左 peripheral 0)
-- BLE wireless host connection
-- レイヤ 4 枚（Base / Symbol / Navigation / System-BT）
-- PMW3610 トラックボール両側対応
 
 ### ビルド
 
