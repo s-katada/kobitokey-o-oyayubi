@@ -53,6 +53,4 @@ jobs:
           path: |
             firmware/central.uf2
             firmware/peripheral.uf2
-            firmware/central.hex
-            firmware/peripheral.hex
           if-no-files-found: error

@@ -97,10 +97,8 @@ col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_10"]
 # Trackball on the right (central) thumb unit.
 [[split.central.input_device.pmw3610]]
 name = "trackball_r"
-id = 0
 spi = { instance = "bitbang0", sck = "P0_03", mosi = "P0_02", miso = "P0_02", cs = "P0_09" }
 motion = "P0_28"
-report_hz = 125
 cpi = 800
 smart_mode = true
 
@@ -118,10 +116,8 @@ col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_10"]
 # Trackball on the left (peripheral) thumb unit.
 [[split.peripheral.input_device.pmw3610]]
 name = "trackball_l"
-id = 1
 spi = { instance = "bitbang0", sck = "P0_03", mosi = "P0_02", miso = "P0_02", cs = "P0_09" }
 motion = "P0_28"
-report_hz = 125
 cpi = 800
 smart_mode = true
 # Mirror horizontal axis so both trackballs move the cursor the same way.
