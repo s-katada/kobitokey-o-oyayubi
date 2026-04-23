@@ -1,0 +1,72 @@
+# Placeholder configuration. Real matrix, pin map and keymap are filled in
+# by subsequent commits (see plan steps 3-5).
+
+[keyboard]
+name = "kobitokey-o-oyayubi"
+product_name = "kobitokey-o-oyayubi"
+vendor_id = 0x4b4f
+product_id = 0x4259
+manufacturer = "s-katada"
+chip = "nrf52840"
+
+[layout]
+rows = 4
+cols = 10
+layers = 4
+keymap = [
+    [
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+    ],
+    [
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+    ],
+    [
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+    ],
+    [
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+    ],
+]
+
+[ble]
+enabled = true
+
+[split]
+connection = "ble"
+
+[split.central]
+rows = 4
+cols = 5
+row_offset = 0
+col_offset = 5
+
+[split.central.matrix]
+# TODO: confirm exact XIAO pin -> nRF52 GPIO mapping from schematic
+row_pins = ["P0_02", "P0_03", "P0_28", "P0_29"]
+col_pins = ["P0_04", "P0_05", "P1_11", "P1_12", "P1_13"]
+
+[[split.peripheral]]
+rows = 4
+cols = 5
+row_offset = 0
+col_offset = 0
+
+[split.peripheral.matrix]
+# TODO: confirm exact XIAO pin -> nRF52 GPIO mapping from schematic
+row_pins = ["P0_02", "P0_03", "P0_28", "P0_29"]
+col_pins = ["P0_04", "P0_05", "P1_11", "P1_12", "P1_13"]
+
+[rmk]
+split_peripherals_num = 1
