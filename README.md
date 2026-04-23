@@ -95,6 +95,14 @@ cargo run --release --bin central
 
 `.cargo/config.toml` の `runner = "probe-rs run --chip nRF52840_xxAA"` が効きます。
 
-### キーマップ変更
+### キーマップ
 
-`firmware/keyboard.toml` の `[layout] keymap` を編集して再ビルドすると反映されます。Vial による実機エディットに対応させる場合は `firmware/vial.json` を整備してください。
+![keymap](firmware/keymap/kobitokey-o-oyayubi.svg)
+
+4 層構成（Base / Symbol / Nav / System）。`firmware/keyboard.toml` の `[layout] keymap` を編集して再ビルドすると実機に反映されます。ドキュメント側の SVG を更新したい場合は、`firmware/keymap/kobitokey-o-oyayubi.yaml` を編集して devshell 内で以下を実行してください。
+
+```fish
+keymap draw firmware/keymap/kobitokey-o-oyayubi.yaml > firmware/keymap/kobitokey-o-oyayubi.svg
+```
+
+Vial による実機エディットに対応させる場合は `firmware/vial.json` を整備してください。
