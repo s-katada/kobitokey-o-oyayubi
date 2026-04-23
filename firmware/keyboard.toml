@@ -68,9 +68,10 @@ keymap = [
         ["F11",  "F12",  "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["_",    "_",    "_",    "_",    "_",         "_",    "_",    "_",    "_",    "_"],
     ],
-    # --- Layer 3: System / Bluetooth (reach via MO(2)+MO(1) combo / TG future) ---
+    # --- Layer 3: System (placeholder; RMK does not expose BLE profile keys
+    # as standard keycodes, so assign as needed via custom Rust handlers) ---
     [
-        ["BT0",  "BT1",  "BT2",  "PREV_BT","NEXT_BT", "CLR_BT","SWITCH","No",  "No",   "No"],
+        ["No",   "No",   "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["No",   "No",   "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["No",   "No",   "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["_",    "_",    "_",    "_",    "_",         "_",    "_",    "_",    "_",    "_"],
