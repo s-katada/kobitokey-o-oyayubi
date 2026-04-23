@@ -1,0 +1,15 @@
+# Nix / direnv
+.direnv/
+result
+result-*
+
+# Rust / firmware
+firmware/target/
+**/*.rs.bk
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
