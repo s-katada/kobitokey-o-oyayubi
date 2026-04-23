@@ -8,3 +8,7 @@ target = "thumbv7em-none-eabihf"
 [env]
 DEFMT_LOG = "info"
 KEYBOARD_TOML_PATH = { value = "keyboard.toml", relative = true }
+# rmk-types pulls in enough proc-macro work (strum, postcard, bitfield_struct,
+# defmt) to blow rustc's default 8 MiB thread stack on some hosts. 16 MiB is
+# what rustc itself recommends in the SIGSEGV hint.
+RUST_MIN_STACK = "16777216"
