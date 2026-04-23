@@ -25,6 +25,7 @@
             "rust-src"
             "rustc"
             "rustfmt"
+            "llvm-tools"
           ])
           pkgs.fenix.targets.thumbv7em-none-eabihf.stable.rust-std
         ];
