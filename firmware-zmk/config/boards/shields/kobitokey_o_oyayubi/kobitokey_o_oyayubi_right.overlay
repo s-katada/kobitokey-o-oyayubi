@@ -1,0 +1,13 @@
+#include "kobitokey_o_oyayubi.dtsi"
+
+/* Right half is the peripheral side. col-offset 5 places its matrix at cols 5..9. */
+
+&default_transform {
+    col-offset = <5>;
+};
+
+/* Mirror horizontal axis so both trackballs move the cursor in the same
+ * direction regardless of which side the user pushes. */
+&trackball {
+    invert-x;
+};
