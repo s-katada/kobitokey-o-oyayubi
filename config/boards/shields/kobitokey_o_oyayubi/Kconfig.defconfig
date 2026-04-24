@@ -1,7 +1,7 @@
 if SHIELD_KOBITOKEY_O_OYAYUBI_LEFT
 
 config ZMK_KEYBOARD_NAME
-    default "kobitokey-o-oyayubi"
+    default "kobito-o-oyayubi"
 
 endif
 
