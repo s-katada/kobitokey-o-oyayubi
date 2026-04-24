@@ -4,18 +4,18 @@ on:
   push:
     branches: [main]
     paths:
-      - "firmware-zmk/**"
+      - "config/**"
+      - "build.yaml"
       - ".github/workflows/firmware-zmk.yml"
   pull_request:
     paths:
-      - "firmware-zmk/**"
+      - "config/**"
+      - "build.yaml"
       - ".github/workflows/firmware-zmk.yml"
   workflow_dispatch:
 
 jobs:
   build:
-    uses: zmkfirmware/zmk/.github/workflows/build-user-config.yml@main
+    uses: zmkfirmware/zmk/.github/workflows/build-user-config.yml@v0.3
     with:
-      build_matrix_path: firmware-zmk/build.yaml
-      config_path: firmware-zmk/config
       archive_name: kobitokey-o-oyayubi-zmk-firmware
