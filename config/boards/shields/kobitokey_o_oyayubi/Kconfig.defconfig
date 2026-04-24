@@ -1,0 +1,19 @@
+if SHIELD_KOBITOKEY_O_OYAYUBI_LEFT
+
+config ZMK_KEYBOARD_NAME
+    default "kobitokey-o-oyayubi"
+
+endif
+
+if SHIELD_KOBITOKEY_O_OYAYUBI_LEFT || SHIELD_KOBITOKEY_O_OYAYUBI_RIGHT
+
+config ZMK_SPLIT
+    default y
+
+config ZMK_POINTING
+    default y
+
+config SPI
+    default y
+
+endif
