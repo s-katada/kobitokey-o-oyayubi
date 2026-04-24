@@ -1,0 +1,8 @@
+---
+include:
+  - board: xiao_ble/nrf52840/zmk
+    shield: kobitokey_o_oyayubi_left
+    artifact-name: kobitokey_o_oyayubi_left
+  - board: xiao_ble/nrf52840/zmk
+    shield: kobitokey_o_oyayubi_right
+    artifact-name: kobitokey_o_oyayubi_right
