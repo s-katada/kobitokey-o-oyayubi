@@ -1,7 +1,0 @@
-#include "kobitokey_o_oyayubi.dtsi"
-
-/* Left half is the central (USB) side. col-offset 0 maps its matrix to cols 0..4. */
-
-&default_transform {
-    col-offset = <0>;
-};
