@@ -36,8 +36,8 @@ build_one() {
         -w /work \
         "$IMAGE" \
         bash -ec "
-            mkdir -p /work/config
-            rsync -a --delete /repo/config/ /work/config/
+            rm -rf /work/config
+            cp -R /repo/config /work/config
             if [ ! -d /work/.west ]; then
                 west init -l /work/config
                 west update --fetch-opt=--filter=tree:0
