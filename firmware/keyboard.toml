@@ -6,28 +6,25 @@
 # Row 3 x COL4 has no switch wired on the PCB. The thumb unit's fifth
 # silk-labeled switch (SW1) is an MSK-12D19 slide switch acting as the
 # physical power cutoff, not a matrix key.
-# ROW/COL nets are shared between main and thumb boards via the FH12-10S
-# 10-pin FFC connector (J1).
-# Diode direction is col2row (default). Each thumb PCB also carries a PMW3610
-# optical trackball sensor (single-wire SDIO).
 #
-# Pin assignments below are derived from the KiCad schematic at
-# thumb-unit-left.kicad_sch. XIAO pins (silk name | XIAO#):
-#   D0 (P0_02, pin1)  -> SDIO   (trackball, bidirectional data)
-#   D1 (P0_03, pin2)  -> SCLK   (trackball clock)
-#   D2 (P0_28, pin3)  -> MOTION (trackball IRQ, active low)
-#   D3 (P0_29, pin4)  -> ROW0
-#   D4 (P0_04, pin5)  -> ROW1
-#   D5 (P0_05, pin6)  -> ROW2
-#   D6 (P1_11, pin7)  -> ROW3
-#   D7 (P1_12, pin8)  -> COL3
-#   D8 (P1_13, pin9)  -> COL2
-#   D9 (P1_14, pin10) -> COL1
-#   D10(P1_15, pin11) -> COL0
-#   NFC2(P0_10)       -> COL4  (back-side pad, NFC disabled in firmware)
-#   NFC1(P0_09)       -> NCS   (trackball chip-select, back-side pad)
-# The mapping needs final confirmation by opening eeschema and checking wire
-# routes visually; update this file if any pin differs.
+# Pin assignments below are derived from the KiCad schematic/PCB for the
+# thumb unit. Important: the COL nets are not in XIAO D10..D7 order. The PCB
+# connects the logical matrix nets as:
+#   D0  (P0_02, pin 1)  -> SDIO   (trackball, bidirectional data)
+#   D1  (P0_03, pin 2)  -> SCLK   (trackball clock)
+#   D2  (P0_28, pin 3)  -> MOTION (trackball IRQ, active low)
+#   D3  (P0_29, pin 4)  -> ROW0
+#   D4  (P0_04, pin 5)  -> ROW1
+#   D5  (P0_05, pin 6)  -> ROW2
+#   D6  (P1_11, pin 7)  -> ROW3
+#   D7  (P1_12, pin 8)  -> COL0
+#   D8  (P1_13, pin 9)  -> COL1
+#   D9  (P1_14, pin 10) -> COL2
+#   D10 (P1_15, pin 11) -> COL3
+#   NFC2(P0_10, pin 22) -> COL4  (back-side pad, NFC disabled in firmware)
+#   NFC1(P0_09, pin 21) -> NCS   (trackball chip-select, back-side pad)
+# Diode direction is col2row, so RMK scans columns as outputs and rows as
+# inputs. ROW/COL nets are shared between main and thumb boards via J1.
 
 [keyboard]
 name = "kobitokey-o-oyayubi"
@@ -46,32 +43,25 @@ layers = 4
 # Row 0..2 are the 3x5 main-unit keys on each side; row 3 has 4 thumb keys
 # per side on cols 0..3 (left) / 5..8 (right). Cols 4 and 9 of row 3 have
 # no switch on the PCB, so the keymap entries there are "No" and never fire.
-# Layers: Layer0 = Base QWERTY, Layer1 = symbols/numbers, Layer2 = nav/Fn,
-# Layer3 = system (reserved).
 keymap = [
-    # --- Layer0: Base (QWERTY) ---
     [
         ["Q",    "W",    "E",    "R",    "T",         "Y",    "U",    "I",    "O",    "P"],
         ["A",    "S",    "D",    "F",    "G",         "H",    "J",    "K",    "L",    "Semicolon"],
         ["Z",    "X",    "C",    "V",    "B",         "N",    "M",    "Comma","Dot",  "Slash"],
-        ["A",    "B",    "C",    "D",    "No",        "Enter","MO(1)","RShift","RAlt","No"],
+        ["LCtrl","LAlt", "MO(1)", "Space","No",        "Enter","MO(1)","RShift","RAlt","No"],
     ],
-    # --- Layer1: Symbol (numbers and shifted symbols) ---
     [
         ["Kc1",  "Kc2",  "Kc3",  "Kc4",  "Kc5",       "Kc6",  "Kc7",  "Kc8",  "Kc9",  "Kc0"],
         ["Minus","Equal","LeftBracket","RightBracket","Backslash",  "Grave","Quote","No","No","No"],
         ["No",   "No",   "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["_",    "_",    "_",    "_",    "_",         "_",    "_",    "_",    "_",    "_"],
     ],
-    # --- Layer2: Navigation / Function ---
     [
         ["F1",   "F2",   "F3",   "F4",   "F5",        "F6",   "F7",   "F8",   "F9",   "F10"],
         ["Home", "PageUp","PageDown","End","Insert",  "Left", "Down", "Up",   "Right","Delete"],
         ["F11",  "F12",  "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["_",    "_",    "_",    "_",    "_",         "_",    "_",    "_",    "_",    "_"],
     ],
-    # --- Layer3: System (placeholder; RMK does not expose BLE profile keys
-    # as standard keycodes, so assign as needed via custom Rust handlers) ---
     [
         ["No",   "No",   "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
         ["No",   "No",   "No",   "No",   "No",        "No",   "No",   "No",   "No",   "No"],
@@ -95,15 +85,7 @@ col_offset = 0
 
 [split.central.matrix]
 row_pins = ["P0_29", "P0_04", "P0_05", "P1_11"]
-col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_10"]
-
-# Trackball disabled until PMW3610 sensor is soldered.
-# [[split.central.input_device.pmw3610]]
-# name = "trackball_r"
-# spi = { instance = "bitbang0", sck = "P0_03", mosi = "P0_02", miso = "P0_02", cs = "P0_09" }
-# motion = "P0_28"
-# cpi = 800
-# smart_mode = true
+col_pins = ["P1_12", "P1_13", "P1_14", "P1_15", "P0_10"]
 
 # Right half = peripheral 0. Keys occupy cols 5..9.
 [[split.peripheral]]
@@ -114,16 +96,11 @@ col_offset = 5
 
 [split.peripheral.matrix]
 row_pins = ["P0_29", "P0_04", "P0_05", "P1_11"]
-col_pins = ["P1_15", "P1_14", "P1_13", "P1_12", "P0_10"]
-
-# Trackball disabled until PMW3610 sensor is soldered.
-# [[split.peripheral.input_device.pmw3610]]
-# name = "trackball_l"
-# spi = { instance = "bitbang0", sck = "P0_03", mosi = "P0_02", miso = "P0_02", cs = "P0_09" }
-# motion = "P0_28"
-# cpi = 800
-# smart_mode = true
-# invert_x = true
+col_pins = ["P1_12", "P1_13", "P1_14", "P1_15", "P0_10"]
 
 [rmk]
 split_peripherals_num = 1
+ble_profiles_num = 4
+combo_max_num = 16
+
+[storage]
