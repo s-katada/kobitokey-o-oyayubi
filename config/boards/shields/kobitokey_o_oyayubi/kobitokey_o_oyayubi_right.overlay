@@ -2,9 +2,21 @@
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include "kobitokey_o_oyayubi.dtsi"
 
+/* Right half lands at combined cols 5..9. Natural physical order matches
+ * the unified layout (COL0 = inner index = combined col 5). */
 &default_transform { col-offset = <5>; };
 
 &xiao_serial { status = "disabled"; };
+
+&kscan0 {
+    col-gpios
+        = <&xiao_d 7  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* COL0 - P1.12 (D7) (inner) */
+        , <&xiao_d 8  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* COL1 - P1.13 (D8) */
+        , <&xiao_d 9  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* COL2 - P1.14 (D9) */
+        , <&xiao_d 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* COL3 - P1.15 (D10) */
+        , <&gpio0 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>  /* COL4 - P0.10 NFC2 (pinky) */
+        ;
+};
 
 &pinctrl {
     spi0_default_r: spi0_default_r {

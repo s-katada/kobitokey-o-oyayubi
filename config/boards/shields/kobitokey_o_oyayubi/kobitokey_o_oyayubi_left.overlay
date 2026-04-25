@@ -3,6 +3,23 @@
 
 &xiao_serial { status = "disabled"; };
 
+/* Left half: declare cols in REVERSE physical order so that kscan col 0 is
+ * the outer pinky column (physical COL4 = P0.10) and kscan col 4 is the
+ * inner index column (physical COL0 = P1.12). col-offset stays at 0 so
+ * combined col 0 lands on the left pinky, matching standard QWERTY layout.
+ *
+ * Inputs (cols) get pull-down because the matrix is row2col scanning: a row
+ * is driven HIGH and only the connected col reads HIGH through the diode. */
+&kscan0 {
+    col-gpios
+        = <&gpio0 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>  /* COL4 - P0.10 NFC2 (pinky) */
+        , <&xiao_d 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* COL3 - P1.15 (D10) */
+        , <&xiao_d 9  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* COL2 - P1.14 (D9) */
+        , <&xiao_d 8  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* COL1 - P1.13 (D8) */
+        , <&xiao_d 7  (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> /* COL0 - P1.12 (D7) (inner) */
+        ;
+};
+
 &pinctrl {
     spi0_default: spi0_default {
         group1 {
