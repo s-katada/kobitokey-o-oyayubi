@@ -13,3 +13,7 @@ firmware/target/
 # Editor
 .vscode/
 .idea/
+
+# ZMK local Docker build cache + UF2 output
+.zmk-build/
+build-output/
