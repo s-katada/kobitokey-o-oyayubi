@@ -152,58 +152,39 @@ describe('kobu2 board geometry', () => {
     }
   });
 
+  it('keeps every thumb key on the thumb plate', () => {
+    for (const k of KOBU2_BOARD.keys.filter((k) => k.kind === 'thumb')) {
+      const plate = plateFor(k.side, 'thumb');
+      if (!plate) throw new Error('missing thumb plate');
+      expect(inside(plate.points, k), `(${k.row},${k.col}) is off the thumb plate`).toBe(true);
+    }
+  });
+
   /**
-   * The outer thumb key's 15mm opening is traced as an axis-aligned notch
-   * in the thumb outline — real DXF geometry, not something derived from
-   * the key list. Asserting the notch is centred on key (3,1) pins the DXF
-   * against the KiCad switch coordinates, so a bad re-export or a changed
-   * offset fails here rather than silently skewing the picture.
+   * The thumb plate's rear edge is where the outer key's 15mm opening was
+   * cut, so it runs exactly half an opening above that key's centre. That
+   * ties DXF geometry to a KiCad switch coordinate, which is the check
+   * that a bad re-export or a changed offset has to survive.
    */
-  it('lands the thumb plate’s outer key notch exactly on that key', () => {
+  it('runs the thumb plate’s rear edge half an opening above the outer key', () => {
     for (const [side, col] of [
       ['left', 1],
       ['right', 8],
     ] as const) {
       const plate = plateFor(side, 'thumb');
       const key = keyAt(3, col);
-      expect(plate).toBeDefined();
-      expect(key).toBeDefined();
-      if (!plate || !key) continue;
-
-      // Find four consecutive points forming a 15 x 15 axis-aligned box.
-      const pts = plate.points;
-      let found: Vec2 | null = null;
-      for (let i = 0; i < pts.length; i++) {
-        const q = [0, 1, 2, 3].map((d) => pts[(i + d) % pts.length]);
-        const [a, b, c, d] = q;
-        if (!a || !b || !c || !d) continue;
-        const w = Math.abs(c.x - a.x);
-        const h = Math.abs(c.y - a.y);
-        const axisAligned =
-          Math.abs(a.x - b.x) < 1e-6 && Math.abs(b.y - c.y) < 1e-6 && Math.abs(c.x - d.x) < 1e-6;
-        if (axisAligned && Math.abs(w - 15) < 1e-6 && Math.abs(h - 15) < 1e-6) {
-          found = { x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 };
-          break;
-        }
+      if (!plate || !key) throw new Error('missing thumb plate or key');
+      // Rear edge = the rear-most horizontal run spanning that key's x.
+      let rear = Infinity;
+      for (let i = 0; i < plate.points.length; i++) {
+        const a = plate.points[i];
+        const b = plate.points[(i + 1) % plate.points.length];
+        if (!a || !b || Math.abs(a.y - b.y) > 1e-6) continue;
+        if (key.x < Math.min(a.x, b.x) || key.x > Math.max(a.x, b.x)) continue;
+        rear = Math.min(rear, a.y);
       }
-      expect(found, `no 15mm notch in the ${side} thumb outline`).not.toBeNull();
-      if (!found) continue;
-      // The outline is stored to 2dp, so 5µm is the tightest this can be.
-      expect(found.x).toBeCloseTo(key.x, 2);
-      expect(found.y).toBeCloseTo(key.y, 2);
-    }
-  });
-
-  it('hugs every thumb key with the thumb plate', () => {
-    for (const k of KOBU2_BOARD.keys.filter((k) => k.kind === 'thumb')) {
-      const plate = plateFor(k.side, 'thumb');
-      if (!plate) throw new Error('missing thumb plate');
-      // Nearest outline vertex. A mis-registered plate would leave keys
-      // stranded far away; a correct one always has material close by.
-      const nearest = Math.min(...plate.points.map((p) => Math.hypot(p.x - k.x, p.y - k.y)));
-      expect(nearest, `(${k.row},${k.col}) is ${nearest.toFixed(1)}mm from its plate`).toBeLessThan(
-        14,
-      );
+      expect(rear).toBeLessThan(Infinity);
+      expect(key.y - rear).toBeCloseTo(7.5, 2);
     }
   });
 

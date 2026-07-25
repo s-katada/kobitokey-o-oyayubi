@@ -177,19 +177,16 @@ const THUMB_KEYS: ReadonlyArray<{ col: number; x: number; y: number; rot: number
  * them in made the render read as a bare plate rather than a keyboard.
  * Only concave detours are filled, and only ones traced as flattened
  * arcs (4+ segments, under 9mm across, under 18mm of area). The real
- * steps are 2-3 straight segments, so shape — not size — is what tells
- * them apart: the column stagger, the hinge notch at x=27..42 and the
- * little 1.5mm ledge that clears the (2,3) keycap all survive untouched.
+ * staircase steps are 2-3 straight segments, so shape — not size — is
+ * what tells them apart, and the column stagger survives untouched.
+ *
+ * Removed separately, by name: the 13.5 x 7mm notch at x=27..42 that
+ * `v2/case/hinji-cover.stl` seats into. A size rule cannot catch it — a
+ * column step encloses ~30mm and that notch ~90mm — so it is matched
+ * exactly, and a DXF that moves it fails the export rather than quietly
+ * leaving a bite in the edge.
  */
 const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [11.5, 68.89],
-  [11.5, 46.5],
-  [27.0, 46.5],
-  [27.0, 39.5],
-  [40.5, 39.5],
-  [40.5, 41.5],
-  [42.0, 41.5],
-  [42.0, 46.5],
   [69.9, 46.5],
   [74.5, 45.26],
   [74.5, -5.09],
@@ -210,6 +207,8 @@ const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
   [-10.5, 71.09],
   [-9.09, 72.5],
   [7.89, 72.5],
+  [11.5, 68.89],
+  [11.5, 46.5],
 ];
 
 /**
@@ -217,22 +216,22 @@ const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
  * (+79.164, +37.575), with the same small-notch fill applied.
  *
  * This is the shape the first build got badly wrong: it is not a uniform
- * band around the keys. The rear edge runs flush with the outer key's
- * 15mm opening (still present here, at x 32.99..47.99 — the cap overhangs
- * it), the front edge sweeps out in a long arc that widens toward the
- * ball, the outer end is a near-straight cut, and the whole thing turns
- * north at x=83.29 into the neck that carries the XIAO and battery.
+ * band around the keys. The rear edge is straight, the front edge sweeps
+ * out in a long arc that widens toward the ball, the outer end is a
+ * near-straight cut, and the whole thing turns north at x=83.29 into the
+ * neck that carries the XIAO and battery.
+ *
+ * The outer key's 15mm opening is cut flush with that rear edge, so the
+ * DXF traces it as a square notch. It is removed here for the same reason
+ * as the hinge seat: the 17.6mm cap overhangs it on every side, so on an
+ * assembled unit there is nothing to see but a straight edge.
  */
 const THUMB_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [32.99, 58.72],
-  [32.99, 73.72],
-  [47.99, 73.72],
-  [47.99, 58.72],
   [47.29, 58.72],
   [47.29, 53.57],
-  [54.01, 54.08],
+  [50.65, 53.78],
   [57.35, 54.5],
-  [63.99, 55.65],
+  [60.68, 55.02],
   [67.28, 56.38],
   [73.78, 58.15],
   [76.99, 59.19],
