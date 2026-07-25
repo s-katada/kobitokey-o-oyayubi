@@ -310,19 +310,17 @@ export function Keyboard({
 
       {/* ── Case ─────────────────────────────────────────────────────── */}
       <g filter={`url(#${gradId}-drop)`}>
-        {/* Hinge tab first: it tucks under the main plate's bottom notch. */}
+        {/* Hinge boss first: it tucks under the main plate's bottom notch. */}
         {hinges.map((hinge) => (
-          <g key={`hinge-${hinge.side}`}>
-            <rect
-              x={hinge.x - hinge.width / 2}
-              y={hinge.y - hinge.height / 2}
-              width={hinge.width}
-              height={hinge.height}
-              rx={1.4}
-              fill="var(--color-case-lo)"
-            />
-            <circle cx={hinge.x} cy={hinge.y} r={1.9} fill="var(--color-case-edge)" />
-          </g>
+          <circle
+            key={`hinge-${hinge.side}`}
+            cx={hinge.x}
+            cy={hinge.y}
+            r={hinge.r}
+            fill="var(--color-case)"
+            stroke="var(--color-case-edge)"
+            strokeWidth={0.35}
+          />
         ))}
         {plates.map((plate) => (
           <PlateShape

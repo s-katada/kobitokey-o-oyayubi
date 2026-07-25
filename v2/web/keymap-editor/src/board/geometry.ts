@@ -107,13 +107,12 @@ export interface CoverPlate {
   height: number;
 }
 
-/** The tab joining the main plate to the thumb plate. */
+/** The round boss joining the main plate to the thumb plate. */
 export interface Hinge {
   side: Side;
   x: number;
   y: number;
-  width: number;
-  height: number;
+  r: number;
 }
 
 export interface BoardGeometry {
@@ -169,34 +168,33 @@ const THUMB_KEYS: ReadonlyArray<{ col: number; x: number; y: number; rot: number
 ];
 
 /**
- * Main top-plate outline, from `v2/pcb/main-top.dxf` translated by
- * (+73.5, +46.5) and simplified to 0.09mm. The staircase along the top and
- * bottom edges is the real column stagger; the notch at the bottom around
- * x=27..42 is where the hinge cover seats.
+ * Main plate silhouette, from `v2/pcb/main-top.dxf` translated by
+ * (+73.5, +46.5).
+ *
+ * The DXF's small semicircular bites — screw-boss reliefs in the TOP plate
+ * — have been filled: the side plate walls straight past them, so they are
+ * not part of what you see looking down at an assembled unit, and leaving
+ * them in made the render read as a bare plate rather than a keyboard.
+ * Only concave detours are filled, and only ones traced as flattened
+ * arcs (4+ segments, under 9mm across, under 18mm of area). The real
+ * steps are 2-3 straight segments, so shape — not size — is what tells
+ * them apart: the column stagger, the hinge notch at x=27..42 and the
+ * little 1.5mm ledge that clears the (2,3) keycap all survive untouched.
  */
 const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
+  [11.5, 68.89],
+  [11.5, 46.5],
+  [27.0, 46.5],
+  [27.0, 39.5],
+  [40.5, 39.5],
+  [40.5, 41.5],
   [42.0, 41.5],
   [42.0, 46.5],
   [69.9, 46.5],
-  [70.13, 45.81],
-  [70.54, 45.21],
-  [71.1, 44.75],
-  [71.77, 44.45],
-  [72.49, 44.35],
-  [73.21, 44.45],
-  [73.88, 44.73],
   [74.5, 45.26],
   [74.5, -5.09],
   [73.09, -6.5],
   [61.61, -6.5],
-  [61.29, -5.64],
-  [60.63, -4.88],
-  [59.82, -4.45],
-  [58.82, -4.33],
-  [57.53, -4.77],
-  [56.63, -5.79],
-  [56.35, -7.13],
-  [56.5, -7.85],
   [56.83, -8.5],
   [41.5, -8.5],
   [41.5, -9.09],
@@ -205,13 +203,6 @@ const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
   [21.5, -9.09],
   [21.5, -6.5],
   [7.18, -6.5],
-  [7.56, -5.67],
-  [7.64, -4.76],
-  [7.4, -3.87],
-  [6.87, -3.13],
-  [6.13, -2.6],
-  [5.24, -2.36],
-  [4.33, -2.44],
   [3.5, -2.82],
   [3.5, 2.5],
   [-9.09, 2.5],
@@ -219,58 +210,20 @@ const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
   [-10.5, 71.09],
   [-9.09, 72.5],
   [7.89, 72.5],
-  [7.6, 71.73],
-  [7.57, 70.91],
-  [7.78, 70.11],
-  [8.29, 69.36],
-  [8.95, 68.86],
-  [9.82, 68.58],
-  [10.64, 68.59],
-  [11.5, 68.89],
-  [11.5, 46.5],
-  [27.0, 46.5],
-  [27.0, 39.5],
-  [40.5, 39.5],
-  [40.5, 41.5],
 ];
 
 /**
- * Thumb top-plate outline, from `v2/pcb/thumb-top.dxf` translated by
- * (+79.164, +37.575) and simplified to 0.09mm.
+ * Thumb plate silhouette, from `v2/pcb/thumb-top.dxf` translated by
+ * (+79.164, +37.575), with the same small-notch fill applied.
  *
- * This is the shape the old build got badly wrong: it is not a uniform
+ * This is the shape the first build got badly wrong: it is not a uniform
  * band around the keys. The rear edge runs flush with the outer key's
- * opening, the front edge sweeps out in a long arc that widens toward the
+ * 15mm opening (still present here, at x 32.99..47.99 — the cap overhangs
+ * it), the front edge sweeps out in a long arc that widens toward the
  * ball, the outer end is a near-straight cut, and the whole thing turns
- * north at x≈83 into the neck that carries the XIAO and battery.
+ * north at x=83.29 into the neck that carries the XIAO and battery.
  */
 const THUMB_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [108.09, 61.07],
-  [108.09, 76.07],
-  [98.03, 94.51],
-  [94.04, 91.84],
-  [90.03, 89.39],
-  [86.02, 87.16],
-  [81.99, 85.14],
-  [77.95, 83.34],
-  [73.9, 81.76],
-  [69.82, 80.37],
-  [65.72, 79.18],
-  [61.57, 78.17],
-  [57.37, 77.34],
-  [53.1, 76.7],
-  [48.74, 76.26],
-  [44.28, 76.01],
-  [39.72, 75.96],
-  [35.06, 76.11],
-  [30.3, 76.45],
-  [29.42, 70.56],
-  [28.2, 58.72],
-  [29.51, 58.72],
-  [30.25, 59.16],
-  [31.09, 59.32],
-  [31.86, 59.22],
-  [32.76, 58.72],
   [32.99, 58.72],
   [32.99, 73.72],
   [47.99, 73.72],
@@ -286,6 +239,19 @@ const THUMB_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
   [83.29, 61.57],
   [83.29, 13.35],
   [108.09, 13.35],
+  [108.09, 76.07],
+  [98.03, 94.51],
+  [91.03, 89.98],
+  [84.01, 86.12],
+  [76.94, 82.93],
+  [69.82, 80.37],
+  [62.61, 78.4],
+  [55.24, 77.0],
+  [47.63, 76.18],
+  [39.72, 75.96],
+  [30.3, 76.45],
+  [29.42, 70.56],
+  [28.2, 58.72],
 ];
 
 /**
@@ -295,20 +261,30 @@ const THUMB_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
  * 29.3 x 32.0mm, so it is very slightly oval; a 15.3mm radius splits it.
  */
 const BALL_CENTRE: Vec2 = { x: 95.28, y: 54.77 };
-/** Housing outer radius: STL footprint is 29.3 x 32.0mm, photo reads 30.7. */
-const BALL_BEZEL_R = 15.4;
+/**
+ * Housing outer radius. The STL footprint is 29.3 x 32.0mm — slightly oval
+ * because the cradle's base flares on one axis — and this takes the narrow
+ * one, which is the ring you actually read as the housing from above.
+ */
+const BALL_BEZEL_R = 14.65;
 /**
  * Visible aperture, NOT the ball diameter. The printed cradle is a "C"
- * whose lip overlaps the ball, so from above only ~22mm of the 25mm ball
- * shows — which is what the photo measures.
+ * whose lip overlaps the 25mm ball, so from above only about two thirds of
+ * the housing's width shows as white.
  */
-const BALL_R = 11.2;
+const BALL_R = 9.5;
 
 /** `v2/case/xiao-cover.stl`, mapped in. Runs under the ball housing. */
 const COVER: CoverPlate = { side: 'left', x: 95.28, y: 44.18, width: 29.5, height: 64.65 };
 
-/** `v2/case/hinji-cover.stl`, seated in the main plate's bottom notch. */
-const HINGE: Hinge = { side: 'left', x: 34.5, y: 49.4, width: 12, height: 5.2 };
+/**
+ * The post joining the main plate to the thumb plate, sitting in the main
+ * plate's bottom notch. `v2/case/hinji-cover.stl` is a 12 x 3.5mm cover;
+ * what reads from above is the round boss under it, measured off the photo
+ * at ~8mm across.
+ */
+const HINGE_R = 4;
+const HINGE_CENTRE: Vec2 = { x: 34.5, y: 49.4 };
 
 // ── Builders ──────────────────────────────────────────────────────────
 
@@ -387,7 +363,7 @@ function build(): BoardGeometry {
     BALL_CENTRE.y + BALL_BEZEL_R,
     COVER.y - COVER.height / 2,
     COVER.y + COVER.height / 2,
-    HINGE.y + HINGE.height / 2,
+    HINGE_CENTRE.y + HINGE_R,
   ];
   const minX = Math.min(...xs) - PLATE_RIM;
   const maxX = Math.max(...xs) + PLATE_RIM;
@@ -409,7 +385,8 @@ function build(): BoardGeometry {
     { side: 'right', ...mirrorPoint(axis, BALL_CENTRE), bezel: BALL_BEZEL_R, ball: BALL_R },
   ];
   const covers: CoverPlate[] = [COVER, { ...COVER, side: 'right', x: axis - COVER.x }];
-  const hinges: Hinge[] = [HINGE, { ...HINGE, side: 'right', x: axis - HINGE.x }];
+  const leftHinge: Hinge = { side: 'left', ...HINGE_CENTRE, r: HINGE_R };
+  const hinges: Hinge[] = [leftHinge, { ...leftHinge, side: 'right', x: axis - leftHinge.x }];
 
   return {
     keys,
