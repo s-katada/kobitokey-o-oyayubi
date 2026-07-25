@@ -13,8 +13,7 @@
  *
  *   * `v2/pcb/left-main/left-main.kicad_pcb`   — 16 main switches
  *   * `v2/pcb/thumb-left/thumb-left.kicad_pcb` — 4 thumb switches, PMW3610
- *   * `v2/pcb/main-top.dxf`                    — main top-plate outline
- *   * `v2/pcb/thumb-top.dxf`                   — thumb top-plate outline
+ *   * `v2/case/{main,thumb}-top-plate.stl`     — plate outlines + key openings
  *   * `v2/case/*.stl`                          — trackball housing, XIAO lid, hinge
  *
  * ⚠ The v2 boards carry their switch footprints on **B.Cu**, so KiCad's
@@ -24,11 +23,12 @@
  *   main:  x = 182 - x_kicad,  y = y_kicad - 72.088
  *   thumb: x = 220 - x_kicad,  y = y_kicad - 44
  *
- * The DXFs land in that same frame under a pure translation, which is how
- * they were registered: each DXF carries one Ø5.5 hole per switch, and
- * those holes match the KiCad switch centres to 0.001mm once translated by
- * `MAIN_DXF_OFFSET` / `THUMB_DXF_OFFSET`. The STL parts agree too — the
- * trackball housing's centre lands 0.3mm from the PMW3610 footprint.
+ * The case parts land in that same frame under a pure translation, which is
+ * how they were registered — and the registration is proven, not assumed.
+ * Slicing each printed top plate yields one 14.00 x 14.00mm opening per
+ * switch, and all 20 openings match the KiCad switch centres to 0.00mm.
+ * The trackball housing agrees too: its footprint centre lands 0.3mm from
+ * the PMW3610 pad.
  *
  * The single fitted number is the main↔thumb offset baked into the thumb
  * transform above: they are separate KiCad projects with unrelated
@@ -129,12 +129,15 @@ export interface BoardGeometry {
 /** Main-unit switch pitch, both axes (v2 PCB: 16.0mm). */
 export const MAIN_PITCH = 16;
 /**
- * Keycap edge lengths, measured off the reference photo against the known
- * switch pitch. The main unit wears Choc caps on a 16mm pitch; the thumb
- * cluster wears larger caps on an 18.65mm arc pitch.
+ * Keycap edge lengths, measured against the plates' own 14mm openings so
+ * the reading needs no scale assumption. Both clusters wear caps of much
+ * the same size; the thumbs only look chunkier because their pitch is
+ * 18.65mm against the main unit's 16mm, leaving wider gaps between caps.
+ * Caps sit slightly proud of the openings, so the openings are not drawn —
+ * nothing of them shows from above.
  */
-export const MAIN_CAP = 14.6;
-export const THUMB_CAP = 17.6;
+export const MAIN_CAP = 14.7;
+export const THUMB_CAP = 15.0;
 /** Side plate stands 1.65mm proud of the top plate all the way round. */
 export const PLATE_RIM = 1.65;
 /** Gap drawn between the two halves in the unified view. */
@@ -168,38 +171,18 @@ const THUMB_KEYS: ReadonlyArray<{ col: number; x: number; y: number; rot: number
 ];
 
 /**
- * Main plate silhouette, from `v2/pcb/main-top.dxf` translated by
- * (+73.5, +46.5).
+ * Main plate silhouette, sliced from `v2/case/main-top-plate.stl` at z=0.5
+ * and mapped in by (-x, -y) + (73.5, 46.5).
  *
- * The DXF's small semicircular bites — screw-boss reliefs in the TOP plate
- * — have been filled: the side plate walls straight past them, so they are
- * not part of what you see looking down at an assembled unit, and leaving
- * them in made the render read as a bare plate rather than a keyboard.
- * Only concave detours are filled, and only ones traced as flattened
- * arcs (4+ segments, under 9mm across, under 18mm of area). The real
- * staircase steps are 2-3 straight segments, so shape — not size — is
- * what tells them apart, and the column stagger survives untouched.
- *
- * Removed separately, by name: the 13.5 x 7mm notch at x=27..42 that
- * `v2/case/hinji-cover.stl` seats into. A size rule cannot catch it — a
- * column step encloses ~30mm and that notch ~90mm — so it is matched
- * exactly, and a DXF that moves it fails the export rather than quietly
- * leaving a bite in the edge.
+ * The printed part, not the DXF. Slicing it also produced the registration
+ * proof used below: 16 separate 14.00 x 14.00mm key openings whose centres
+ * match all 16 transcribed KiCad switch positions to 0.00mm. The plate's
+ * mounting-screw reliefs — shallow arcs bitten into the edge — are filled,
+ * since the side plate walls past them and they otherwise read as scallops
+ * chewed out of the case; the staircase steps are straight 2-3 segment
+ * runs, so shape tells them apart and the column stagger survives.
  */
 const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [69.9, 46.5],
-  [74.5, 45.26],
-  [74.5, -5.09],
-  [73.09, -6.5],
-  [61.61, -6.5],
-  [56.83, -8.5],
-  [41.5, -8.5],
-  [41.5, -9.09],
-  [40.09, -10.5],
-  [22.91, -10.5],
-  [21.5, -9.09],
-  [21.5, -6.5],
-  [7.18, -6.5],
   [3.5, -2.82],
   [3.5, 2.5],
   [-9.09, 2.5],
@@ -209,48 +192,67 @@ const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
   [7.89, 72.5],
   [11.5, 68.89],
   [11.5, 46.5],
+  [69.9, 46.5],
+  [74.5, 45.26],
+  [74.5, -5.09],
+  [73.09, -6.5],
+  [61.61, -6.5],
+  [56.54, -7.95],
+  [56.83, -8.5],
+  [41.5, -8.5],
+  [41.5, -9.09],
+  [40.09, -10.5],
+  [22.91, -10.5],
+  [21.5, -9.09],
+  [21.5, -6.5],
+  [7.18, -6.5],
 ];
 
 /**
- * Thumb plate silhouette, from `v2/pcb/thumb-top.dxf` translated by
- * (+79.164, +37.575), with the same small-notch fill applied.
+ * Thumb plate silhouette, sliced from `v2/case/thumb-top-plate.stl` at
+ * z=0.5 and mapped in by (-x, -y) + (79.164, 37.575). Its four 14mm
+ * openings likewise centre on the four KiCad thumb switches exactly.
  *
- * This is the shape the first build got badly wrong: it is not a uniform
- * band around the keys. The rear edge is straight, the front edge sweeps
- * out in a long arc that widens toward the ball, the outer end is a
- * near-straight cut, and the whole thing turns north at x=83.29 into the
- * neck that carries the XIAO and battery.
+ * Going here from `thumb-top.dxf` fixed the last visible artefact. The DXF
+ * carries an internal line flush with the outer key's opening, which chains
+ * into the outline as a square notch — so the render showed a bite out of
+ * the rear edge next to that key. The printed part has no such thing: the
+ * rear edge is continuous at y=53.57 and the opening sits 5.65mm inside it,
+ * which is exactly what the reference photo shows.
  *
- * The outer key's 15mm opening is cut flush with that rear edge, so the
- * DXF traces it as a square notch. It is removed here for the same reason
- * as the hinge seat: the 17.6mm cap overhangs it on every side, so on an
- * assembled unit there is nothing to see but a straight edge.
+ * The rectangular gap at x 88..108, y 48.6..61.1 is the trackball housing's
+ * opening. It is left in because the housing, drawn on top, covers it
+ * completely. The plate also stops at y=38.57 rather than running the full
+ * neck; the XIAO lid covers the rest.
  */
 const THUMB_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [47.29, 58.72],
+  [86.02, 87.16],
+  [77.95, 83.34],
+  [69.82, 80.37],
+  [61.57, 78.17],
+  [53.1, 76.7],
+  [44.28, 76.01],
+  [39.72, 75.96],
+  [30.3, 76.45],
+  [29.47, 70.83],
+  [28.55, 62.86],
+  [27.89, 53.57],
   [47.29, 53.57],
   [50.65, 53.78],
   [57.35, 54.5],
-  [60.68, 55.02],
-  [67.28, 56.38],
-  [73.78, 58.15],
+  [63.99, 55.65],
+  [70.55, 57.21],
   [76.99, 59.19],
   [83.29, 61.57],
-  [83.29, 13.35],
-  [108.09, 13.35],
+  [83.29, 38.57],
+  [108.09, 38.57],
+  [108.09, 48.57],
+  [88.09, 48.57],
+  [88.09, 61.07],
+  [108.09, 61.07],
   [108.09, 76.07],
   [98.03, 94.51],
-  [91.03, 89.98],
-  [84.01, 86.12],
-  [76.94, 82.93],
-  [69.82, 80.37],
-  [62.61, 78.4],
-  [55.24, 77.0],
-  [47.63, 76.18],
-  [39.72, 75.96],
-  [30.3, 76.45],
-  [29.42, 70.56],
-  [28.2, 58.72],
+  [90.03, 89.39],
 ];
 
 /**

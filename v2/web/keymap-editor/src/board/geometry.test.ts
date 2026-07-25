@@ -161,12 +161,38 @@ describe('kobu2 board geometry', () => {
   });
 
   /**
-   * The thumb plate's rear edge is where the outer key's 15mm opening was
-   * cut, so it runs exactly half an opening above that key's centre. That
-   * ties DXF geometry to a KiCad switch coordinate, which is the check
-   * that a bad re-export or a changed offset has to survive.
+   * Registration guard for the main plate, and the tighter of the two: the
+   * printed plate leaves the same 3.15mm of material past the outermost cap
+   * on all four sides. Drift the plate against the switch coordinates by
+   * even 1mm and the margins stop matching each other, in whichever
+   * direction it moved.
    */
-  it('runs the thumb plate’s rear edge half an opening above the outer key', () => {
+  it('leaves a uniform margin around the main key block', () => {
+    for (const side of ['left', 'right'] as const) {
+      const plate = plateFor(side, 'main');
+      const keys = KOBU2_BOARD.keys.filter((k) => k.side === side && k.kind === 'main');
+      if (!plate || keys.length === 0) throw new Error('missing main plate');
+      const half = (keys[0]?.size ?? 0) / 2;
+      const capMinX = Math.min(...keys.map((k) => k.x - half));
+      const capMaxX = Math.max(...keys.map((k) => k.x + half));
+      const capMinY = Math.min(...keys.map((k) => k.y - half));
+      const capMaxY = Math.max(...keys.map((k) => k.y + half));
+      const margins = [
+        capMinX - Math.min(...plate.points.map((p) => p.x)),
+        Math.max(...plate.points.map((p) => p.x)) - capMaxX,
+        capMinY - Math.min(...plate.points.map((p) => p.y)),
+        Math.max(...plate.points.map((p) => p.y)) - capMaxY,
+      ];
+      for (const m of margins) expect(m).toBeCloseTo(3.15, 1);
+    }
+  });
+
+  /**
+   * Registration guard for the thumb plate: its rear edge sits a measured
+   * 12.65mm behind the outer key's centre. Ties the sliced STL to a KiCad
+   * switch coordinate, so a changed offset fails here.
+   */
+  it('sets the thumb plate’s rear edge the measured distance behind the outer key', () => {
     for (const [side, col] of [
       ['left', 1],
       ['right', 8],
@@ -184,7 +210,7 @@ describe('kobu2 board geometry', () => {
         rear = Math.min(rear, a.y);
       }
       expect(rear).toBeLessThan(Infinity);
-      expect(key.y - rear).toBeCloseTo(7.5, 2);
+      expect(key.y - rear).toBeCloseTo(12.65, 1);
     }
   });
 
