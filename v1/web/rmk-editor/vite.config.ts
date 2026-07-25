@@ -42,13 +42,14 @@ export default defineConfig({
         // bypasses the SW so users always get the latest GitHub
         // release.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
-        // The ZMK editor (a separate SPA) is deployed under `/zmk/`. Keep
-        // its assets out of this service worker's precache, and don't let
-        // this SW's navigation fallback hijack `/zmk` routes — the Worker
-        // serves that app's own index.
-        globIgnores: ['**/zmk/**'],
+        // The ZMK editor (`/zmk/`) and the kobu2 editor (`/v2/`) are
+        // separate SPAs deployed under this origin. Keep their assets out
+        // of this service worker's precache, and don't let this SW's
+        // navigation fallback hijack their routes — the Worker serves each
+        // app's own index.
+        globIgnores: ['**/zmk/**', '**/v2/**'],
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/__release/, /^\/zmk/],
+        navigateFallbackDenylist: [/^\/__release/, /^\/zmk/, /^\/v2/],
         runtimeCaching: [],
         // ~5 MB ceiling per asset; the bundle is ~300 kB so this is
         // headroom, but keep it explicit so the build fails loudly if

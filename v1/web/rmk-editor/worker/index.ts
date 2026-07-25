@@ -80,6 +80,8 @@ const SECURITY_HEADERS: Record<string, string> = {
 
 // Powerful-API allow-list, per app:
 //   * the RMK editor (root `/`) needs WebHID;
+//   * the kobu2 editor (`/v2`) also needs WebHID, so it falls in the same
+//     branch as the root app;
 //   * the ZMK editor (`/zmk`) needs Web Serial + Web Bluetooth (ZMK
 //     Studio transports).
 // Everything else is denied. The policy is attached to the served
@@ -291,11 +293,15 @@ export default {
       return handleFirmwareBuild(request, url, env);
     }
 
-    // The ZMK editor is a separate SPA built with base `/zmk/` and served
-    // from `dist/zmk/`. Normalise the bare path so `/zmk` lands on its
-    // index instead of the root SPA fallback.
+    // The ZMK editor (`/zmk`) and the kobu2 editor (`/v2`) are separate
+    // SPAs, built with those base paths and served from `dist/zmk/` and
+    // `dist/v2/`. Normalise the bare path so each lands on its own index
+    // instead of falling through to the root SPA.
     if (url.pathname === '/zmk') {
       return Response.redirect(new URL('/zmk/', url).toString(), 301);
+    }
+    if (url.pathname === '/v2') {
+      return Response.redirect(new URL('/v2/', url).toString(), 301);
     }
 
     const response = await env.ASSETS.fetch(request);
