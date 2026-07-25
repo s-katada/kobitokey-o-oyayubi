@@ -275,8 +275,15 @@ const BALL_BEZEL_R = 14.65;
  */
 const BALL_R = 9.5;
 
-/** `v2/case/xiao-cover.stl`, mapped in. Runs under the ball housing. */
-const COVER: CoverPlate = { side: 'left', x: 95.28, y: 44.18, width: 29.5, height: 64.65 };
+/**
+ * `v2/case/xiao-cover.stl`, mapped in. Its true extent is y 11.86..76.50,
+ * but the lower ~18mm of that runs UNDER the trackball housing and then
+ * under the thumb plate, so drawing it full length only put a rectangle —
+ * and its outline — across the two innermost thumb keys. It is cut off at
+ * y=58, comfortably inside the housing (which spans y 40.1..69.4), so what
+ * remains is exactly the lid you can actually see.
+ */
+const COVER: CoverPlate = { side: 'left', x: 95.28, y: 34.93, width: 29.5, height: 46.14 };
 
 /**
  * The post joining the main plate to the thumb plate, sitting in the main
