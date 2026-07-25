@@ -9,7 +9,7 @@
  * ## Everything here is measured, not drawn by eye
  *
  * Switch positions come from the as-built KiCad boards, and the case
- * outlines come from the DXFs the printed plates were actually cut from:
+ * outlines are sliced out of the STLs of the parts that were printed:
  *
  *   * `v2/pcb/left-main/left-main.kicad_pcb`   — 16 main switches
  *   * `v2/pcb/thumb-left/thumb-left.kicad_pcb` — 4 thumb switches, PMW3610
@@ -76,11 +76,9 @@ export interface Vec2 {
 /**
  * A case plate, drawn as a filled polygon with a raised rim.
  *
- * The thumb unit's four 15mm switch openings are already part of
- * `points` — the DXF traces them as notches in the outline rather than as
- * separate holes, because each one is flush with the plate's rear edge.
- * They are not carried separately: a 17.6mm thumb cap overhangs a 15mm
- * opening on every side, so there would be nothing left to see.
+ * The 14mm switch openings are not carried: a cap covers its own opening
+ * completely, so nothing of them shows from above. They are still what the
+ * outlines were registered against — see MAIN_PLATE_OUTLINE.
  */
 export interface Plate {
   side: Side;
@@ -107,7 +105,7 @@ export interface CoverPlate {
   height: number;
 }
 
-/** The round boss joining the main plate to the thumb plate. */
+/** The hinge dome bridging the main plate and the thumb plate. */
 export interface Hinge {
   side: Side;
   x: number;
@@ -176,36 +174,38 @@ const THUMB_KEYS: ReadonlyArray<{ col: number; x: number; y: number; rot: number
  *
  * The printed part, not the DXF. Slicing it also produced the registration
  * proof used below: 16 separate 14.00 x 14.00mm key openings whose centres
- * match all 16 transcribed KiCad switch positions to 0.00mm. The plate's
- * mounting-screw reliefs — shallow arcs bitten into the edge — are filled,
- * since the side plate walls past them and they otherwise read as scallops
- * chewed out of the case; the staircase steps are straight 2-3 segment
- * runs, so shape tells them apart and the column stagger survives.
+ * match all 16 transcribed KiCad switch positions to 0.00mm.
+ *
+ * The plate's four mounting-screw reliefs — shallow arcs bitten into the
+ * edge — are removed, since the side plate walls past them and they
+ * otherwise read as scallops chewed out of the case. Each is replaced by
+ * the corner it was cut into, NOT by a chord across its ends: this edge is
+ * rectilinear, and a chord leaves a diagonal where the plate has a right
+ * angle. Three reliefs sit on corners and reconstruct as the intersection
+ * of the straight edges either side; the fourth sits on the col3/col4
+ * riser, which is restored as a square step at x=59.22, midway between the
+ * relief's ends.
  */
 const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [3.5, -2.82],
   [3.5, 2.5],
   [-9.09, 2.5],
   [-10.5, 3.91],
   [-10.5, 71.09],
   [-9.09, 72.5],
-  [7.89, 72.5],
-  [11.5, 68.89],
+  [11.5, 72.5],
   [11.5, 46.5],
-  [69.9, 46.5],
-  [74.5, 45.26],
+  [74.5, 46.5],
   [74.5, -5.09],
   [73.09, -6.5],
-  [61.61, -6.5],
-  [56.54, -7.95],
-  [56.83, -8.5],
+  [59.22, -6.5],
+  [59.22, -8.5],
   [41.5, -8.5],
   [41.5, -9.09],
   [40.09, -10.5],
   [22.91, -10.5],
   [21.5, -9.09],
   [21.5, -6.5],
-  [7.18, -6.5],
+  [3.5, -6.5],
 ];
 
 /**
@@ -226,13 +226,8 @@ const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
  * neck; the XIAO lid covers the rest.
  */
 const THUMB_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [86.02, 87.16],
-  [77.95, 83.34],
-  [69.82, 80.37],
-  [61.57, 78.17],
-  [53.1, 76.7],
   [44.28, 76.01],
-  [39.72, 75.96],
+  [37.41, 76.01],
   [30.3, 76.45],
   [29.47, 70.83],
   [28.55, 62.86],
@@ -252,7 +247,12 @@ const THUMB_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
   [108.09, 61.07],
   [108.09, 76.07],
   [98.03, 94.51],
-  [90.03, 89.39],
+  [92.04, 90.59],
+  [86.02, 87.16],
+  [77.95, 83.34],
+  [69.82, 80.37],
+  [61.57, 78.17],
+  [53.1, 76.7],
 ];
 
 /**
@@ -286,13 +286,18 @@ const BALL_R = 9.5;
 const COVER: CoverPlate = { side: 'left', x: 95.28, y: 34.93, width: 29.5, height: 46.14 };
 
 /**
- * The post joining the main plate to the thumb plate, sitting in the main
- * plate's bottom notch. `v2/case/hinji-cover.stl` is a 12 x 3.5mm cover;
- * what reads from above is the round boss under it, measured off the photo
- * at ~8mm across.
+ * The hinge, filling the gap between the two units. `v2/case/hinji-cover.stl`
+ * is 12 x 3.5mm, and the photo shows it as a dome rising from the thumb
+ * plate's rear edge to meet the main plate's bottom edge — not the free
+ * circle an earlier build drew, which read as a wart on the plate.
+ *
+ * Modelled as a 12mm circle centred on the thumb plate's rear edge. Drawn
+ * under both plates, so what shows is the 3.8mm band between them: a dome
+ * ~11.5mm wide at its base narrowing to ~5mm where it meets the main
+ * plate, which is the profile in the photo.
  */
-const HINGE_R = 4;
-const HINGE_CENTRE: Vec2 = { x: 34.5, y: 49.4 };
+const HINGE_R = 6;
+const HINGE_CENTRE: Vec2 = { x: 34.5, y: 53.6 };
 
 // ── Builders ──────────────────────────────────────────────────────────
 
