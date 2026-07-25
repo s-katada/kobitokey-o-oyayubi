@@ -1,0 +1,107 @@
+@import 'tailwindcss';
+
+/*
+ * Theme is driven by `data-theme` on <html>, set by src/lib/theme.ts from
+ * the stored preference or the OS setting. Making it explicit (rather than
+ * leaning on the bare `prefers-color-scheme` default) is what lets the
+ * in-app toggle win in both directions.
+ */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans',
+    'Noto Sans JP', Meiryo, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  /* ── UI chrome ──────────────────────────────────────────────────── */
+  --color-canvas: #f1f2f5;
+  --color-panel: #ffffff;
+  --color-panel-2: #f7f8fa;
+  --color-line: #e1e4e9;
+  --color-ink: #14161a;
+  --color-muted: #667085;
+
+  --color-accent: #ff6b35;
+  --color-accent-soft: #fff1ea;
+  --color-accent-ink: #ffffff;
+
+  --color-ok: #12a150;
+  --color-warn: #b45309;
+  --color-danger: #dc2626;
+
+  /*
+   * ── The keyboard itself ────────────────────────────────────────────
+   * Sampled from the reference photo of the printed v2 case
+   * (docs/kobu2-reference.jpg). These are deliberately NOT theme-aware:
+   * the keyboard is a physical grey object and should read as the same
+   * object in light and dark mode. Only its drop shadow changes.
+   */
+  --color-case: #c6c6c1;
+  --color-case-hi: #d9d9d4;
+  --color-case-lo: #a3a39d;
+  --color-case-edge: #8d8d87;
+  --color-cap: #d4d4cf;
+  --color-cap-hi: #e4e4df;
+  --color-cap-lo: #b7b7b1;
+  --color-cap-edge: #9a9a94;
+  --color-ball: #f7f7f4;
+  --color-ball-lo: #d3d3ce;
+}
+
+[data-theme='dark'] {
+  --color-canvas: #0c0e12;
+  --color-panel: #14171d;
+  --color-panel-2: #191d24;
+  --color-line: #272c35;
+  --color-ink: #e9ebef;
+  --color-muted: #949dab;
+
+  --color-accent: #ff7a45;
+  --color-accent-soft: #35190f;
+
+  --color-ok: #3ddc84;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  [data-theme='dark'] {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    margin: 0;
+    /* The board view is the point of this app — never let it be clipped
+       by an accidental horizontal scroll on narrow screens. */
+    overflow-x: hidden;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+@layer components {
+  /* Shared chrome for the panels that frame the board. */
+  .panel {
+    @apply bg-panel border border-line rounded-2xl;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
