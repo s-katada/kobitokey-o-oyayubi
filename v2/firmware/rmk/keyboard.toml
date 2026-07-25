@@ -26,21 +26,28 @@
 #   NFC2(P0_10, pin 22) -> COL4  (back-side pad, NFC disabled in firmware)
 #   NFC1(P0_09, pin 21) -> NCS   (trackball chip-select, back-side pad)
 #   USER_LED_G(P0_30)   -> boot indicator LED (common anode, LOW = on)
-# FFC cable type (CRITICAL):
-#   The thumb-unit J1 pinout is "natural order" (1=+3V3, 2=GND, 3..5=ROW0..2,
-#   6..10=COL0..4). The main-unit J1 pinout is the EXACT REVERSE
-#   (1=COL4..10=+3V3). For these to mate as designed, the FFC cable must
-#   reverse pin mapping (pin 1 of one connector goes to pin 10 of the
-#   other). With the wrong cable (straight mapping pin 1 ↔ pin 1) the
-#   matrix scans 90° rotated AND P0.10 / P1.15 get shorted to +3V3 / GND
-#   respectively, killing two columns and leaving the chip vulnerable.
+# FFC cable mapping (CRITICAL — INVERTED vs v1):
+#   On v2 BOTH ends carry the SAME J1 pinout. Verified against the as-built
+#   boards (../../pcb/{left,right}-main, ../../pcb/thumb-{left,right}):
+#     1=/ROW0  2=/ROW1  3=/ROW2  4=/ROW3
+#     5=/COL0  6=/COL1  7=/COL2  8=/COL3  9=/COL4  10=NC
+#   The required mapping is therefore STRAIGHT (pin N ↔ pin N) — the exact
+#   OPPOSITE of v1, where the thumb J1 was natural order with +3V3/GND on
+#   pins 1/2 and the main J1 was its exact reverse, so v1 needed a
+#   reverse-mapping cable. Choose the FFC's contact side (same-side
+#   "Type A" vs opposite-side "Type D") so that pin 1 actually lands on
+#   pin 1 once both connectors sit in the case: main J1 is at rot 0 while
+#   the thumb J1 is at ±98°, so confirm with the meter, do not assume.
 #
 #   Multimeter check (power OFF):
-#     main J1 pin 1 (COL4) ↔ thumb J1 pin 10 (COL4) → MUST beep
-#     main J1 pin 1 (COL4) ↔ thumb J1 pin 1  (+3V3) → must NOT beep
-#   If the second test beeps, swap to a reverse-mapping FFC ("opposite-
-#   contact" / "Type 2"). No firmware change can compensate cleanly for
-#   the wrong cable since two MCU pins are clamped to power rails.
+#     main J1 pin 1 (/ROW0) ↔ thumb J1 pin 1 (/ROW0) → MUST beep
+#     main J1 pin 1 (/ROW0) ↔ thumb J1 pin 9 (/COL4) → must NOT beep
+#   With a reverse-mapping cable the matrix is scrambled (ROW and COL swap
+#   places) and no firmware setting can compensate. Unlike v1 there are no
+#   power rails on the v2 FFC — pin 10 is NC on both boards and the main
+#   board is fully passive (16 switches + 16 diodes, nothing else) — so the
+#   wrong cable no longer clamps MCU pins to +3V3 / GND; it simply does not
+#   scan.
 #
 # Diode direction (CONFIRMED 2026-05-12):
 #   Both main and thumb units use diodes installed PER SILKSCREEN —
