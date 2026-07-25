@@ -14,7 +14,7 @@ import { memo, useCallback, useId, useMemo, useRef } from 'react';
 import type { KeyboardLayoutDef } from '../protocol/handshake';
 import { labelForKeycode } from '../protocol/keycodes';
 import type { Keymap } from '../protocol/keymap';
-import { type BoardKey, KOBU2_BOARD, keyAt } from './geometry';
+import { type BoardKey, KOBU2_BOARD, keyAt, PLATE_RIM, type Plate } from './geometry';
 
 export interface KeyPosition {
   row: number;
@@ -207,10 +207,25 @@ function polygonPoints(points: ReadonlyArray<{ x: number; y: number }>): string 
   return points.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
 }
 
-function polylinePath(points: ReadonlyArray<{ x: number; y: number }>): string {
-  return points
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
-    .join(' ');
+/**
+ * One case plate: the side plate, which stands 1.65mm proud all the way
+ * round, painted as a stroke under the top plate's fill. Stroking the same
+ * polygon is what gives the raised rim you see around the real case.
+ */
+function PlateShape({ plate, fill }: { plate: Plate; fill: string }) {
+  const pts = polygonPoints(plate.points);
+  return (
+    <g>
+      <polygon
+        points={pts}
+        fill="var(--color-case-lo)"
+        stroke="var(--color-case-lo)"
+        strokeWidth={PLATE_RIM * 2}
+        strokeLinejoin="round"
+      />
+      <polygon points={pts} fill={fill} stroke="var(--color-case-edge)" strokeWidth={0.35} />
+    </g>
+  );
 }
 
 export function Keyboard({
@@ -224,7 +239,7 @@ export function Keyboard({
 }: KeyboardProps) {
   const gradId = useId();
   const svgRef = useRef<SVGSVGElement>(null);
-  const { viewBox, keys, plates, thumbBands, balls, covers, posts } = KOBU2_BOARD;
+  const { viewBox, keys, plates, balls, covers, hinges } = KOBU2_BOARD;
 
   /**
    * Arrow keys walk the matrix. Left/right step through the unified
@@ -295,49 +310,30 @@ export function Keyboard({
 
       {/* ── Case ─────────────────────────────────────────────────────── */}
       <g filter={`url(#${gradId}-drop)`}>
-        {thumbBands.map((band) => (
-          <path
-            key={`band-${band.side}`}
-            d={polylinePath(band.points)}
-            fill="none"
-            stroke="var(--color-case-lo)"
-            strokeWidth={band.width}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ))}
-        {posts.map((post) => (
-          <circle
-            key={`post-${post.side}`}
-            cx={post.x}
-            cy={post.y}
-            r={post.r}
-            fill="var(--color-case-lo)"
-          />
+        {/* Hinge tab first: it tucks under the main plate's bottom notch. */}
+        {hinges.map((hinge) => (
+          <g key={`hinge-${hinge.side}`}>
+            <rect
+              x={hinge.x - hinge.width / 2}
+              y={hinge.y - hinge.height / 2}
+              width={hinge.width}
+              height={hinge.height}
+              rx={1.4}
+              fill="var(--color-case-lo)"
+            />
+            <circle cx={hinge.x} cy={hinge.y} r={1.9} fill="var(--color-case-edge)" />
+          </g>
         ))}
         {plates.map((plate) => (
-          <polygon
-            key={`plate-${plate.side}`}
-            points={polygonPoints(plate.points)}
+          <PlateShape
+            key={`plate-${plate.side}-${plate.kind}`}
+            plate={plate}
             fill={`url(#${gradId}-plate)`}
-            stroke="var(--color-case-edge)"
-            strokeWidth={0.4}
-            strokeLinejoin="round"
           />
         ))}
-        {/* Thumb band top surface, inset so the darker stroke below reads
-            as the plate's chamfered edge. */}
-        {thumbBands.map((band) => (
-          <path
-            key={`band-top-${band.side}`}
-            d={polylinePath(band.points)}
-            fill="none"
-            stroke={`url(#${gradId}-plate)`}
-            strokeWidth={band.width - 1.4}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ))}
+        {/* XIAO / battery lid. Same material as the plates, so it reads as
+            part of the case rather than a slab laid on top; its lower half
+            disappears behind the trackball housing drawn next. */}
         {covers.map((cover) => (
           <rect
             key={`cover-${cover.side}`}
@@ -345,8 +341,8 @@ export function Keyboard({
             y={cover.y - cover.height / 2}
             width={cover.width}
             height={cover.height}
-            rx={3}
-            fill="var(--color-case-hi)"
+            rx={4}
+            fill={`url(#${gradId}-plate)`}
             stroke="var(--color-case-edge)"
             strokeWidth={0.4}
           />

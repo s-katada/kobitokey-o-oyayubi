@@ -6,27 +6,35 @@
  * matching SVG). Rotations are degrees **clockwise**, also matching SVG's
  * `rotate()`.
  *
- * ## Where the numbers come from
+ * ## Everything here is measured, not drawn by eye
  *
- * Everything inside one unit is transcribed from the as-built KiCad
- * boards, so key spacing and the thumb arc are exact rather than eyeballed:
+ * Switch positions come from the as-built KiCad boards, and the case
+ * outlines come from the DXFs the printed plates were actually cut from:
  *
  *   * `v2/pcb/left-main/left-main.kicad_pcb`   — 16 main switches
- *   * `v2/pcb/thumb-left/thumb-left.kicad_pcb` — 4 thumb switches, PMW3610, XIAO
+ *   * `v2/pcb/thumb-left/thumb-left.kicad_pcb` — 4 thumb switches, PMW3610
+ *   * `v2/pcb/main-top.dxf`                    — main top-plate outline
+ *   * `v2/pcb/thumb-top.dxf`                   — thumb top-plate outline
+ *   * `v2/case/*.stl`                          — trackball housing, XIAO lid, hinge
  *
- * ⚠ Those boards carry their switch footprints on **B.Cu**, so KiCad's
+ * ⚠ The v2 boards carry their switch footprints on **B.Cu**, so KiCad's
  * default (front) view is mirrored with respect to the physical top view.
- * Every x below is therefore negated before use:
+ * Every x is therefore negated before use:
  *
  *   main:  x = 182 - x_kicad,  y = y_kicad - 72.088
  *   thumb: x = 220 - x_kicad,  y = y_kicad - 44
  *
- * The main transform just moves the outer pinky column to x = 0 and the
- * top row to y = 0. The thumb transform's constants are the one thing CAD
- * cannot supply — main and thumb are separate KiCad projects with
- * unrelated origins — so the offset was fitted to the reference photo
- * (`docs/kobu2-reference.jpg`) across all four thumb keys and the
- * trackball; the residual is ~2mm.
+ * The DXFs land in that same frame under a pure translation, which is how
+ * they were registered: each DXF carries one Ø5.5 hole per switch, and
+ * those holes match the KiCad switch centres to 0.001mm once translated by
+ * `MAIN_DXF_OFFSET` / `THUMB_DXF_OFFSET`. The STL parts agree too — the
+ * trackball housing's centre lands 0.3mm from the PMW3610 footprint.
+ *
+ * The single fitted number is the main↔thumb offset baked into the thumb
+ * transform above: they are separate KiCad projects with unrelated
+ * origins, so their relative placement was matched against the reference
+ * photo (`docs/kobu2-reference.jpg`) across all four thumb keys and the
+ * ball. Residual is ~2mm.
  *
  * ## Matrix mapping
  *
@@ -65,16 +73,19 @@ export interface Vec2 {
   y: number;
 }
 
-export interface PlateOutline {
+/**
+ * A case plate, drawn as a filled polygon with a raised rim.
+ *
+ * The thumb unit's four 15mm switch openings are already part of
+ * `points` — the DXF traces them as notches in the outline rather than as
+ * separate holes, because each one is flush with the plate's rear edge.
+ * They are not carried separately: a 17.6mm thumb cap overhangs a 15mm
+ * opening on every side, so there would be nothing left to see.
+ */
+export interface Plate {
   side: Side;
+  kind: 'main' | 'thumb';
   points: Vec2[];
-}
-
-export interface ThumbBand {
-  side: Side;
-  /** Centre line of the band; drawn as a thick round-capped polyline. */
-  points: Vec2[];
-  width: number;
 }
 
 export interface Trackball {
@@ -87,6 +98,7 @@ export interface Trackball {
   ball: number;
 }
 
+/** The printed lid over the XIAO / battery / sensor bay. */
 export interface CoverPlate {
   side: Side;
   x: number;
@@ -95,20 +107,21 @@ export interface CoverPlate {
   height: number;
 }
 
-export interface HingePost {
+/** The tab joining the main plate to the thumb plate. */
+export interface Hinge {
   side: Side;
   x: number;
   y: number;
-  r: number;
+  width: number;
+  height: number;
 }
 
 export interface BoardGeometry {
   keys: BoardKey[];
-  plates: PlateOutline[];
-  thumbBands: ThumbBand[];
+  plates: Plate[];
   balls: Trackball[];
   covers: CoverPlate[];
-  posts: HingePost[];
+  hinges: Hinge[];
   viewBox: { x: number; y: number; width: number; height: number };
 }
 
@@ -116,16 +129,19 @@ export interface BoardGeometry {
 
 /** Main-unit switch pitch, both axes (v2 PCB: 16.0mm). */
 export const MAIN_PITCH = 16;
-/** Main keycap edge length. Choc caps on a 16mm pitch leave ~1mm of gap. */
-export const MAIN_CAP = 15;
-/** Thumb keycap edge length — the thumb arc uses an ~18.6mm pitch. */
-export const THUMB_CAP = 17.5;
-/** Plate material visible around the outermost caps. */
-const PLATE_PAD = 3.5;
+/**
+ * Keycap edge lengths, measured off the reference photo against the known
+ * switch pitch. The main unit wears Choc caps on a 16mm pitch; the thumb
+ * cluster wears larger caps on an 18.65mm arc pitch.
+ */
+export const MAIN_CAP = 14.6;
+export const THUMB_CAP = 17.6;
+/** Side plate stands 1.65mm proud of the top plate all the way round. */
+export const PLATE_RIM = 1.65;
 /** Gap drawn between the two halves in the unified view. */
-const HALF_GAP = 30;
+const HALF_GAP = 26;
 /** Padding around the whole board in the emitted viewBox. */
-const VIEW_PAD = 6;
+const VIEW_PAD = 5;
 
 /**
  * Left-half main columns, indexed by **keymap column** (0 = outer pinky).
@@ -152,22 +168,151 @@ const THUMB_KEYS: ReadonlyArray<{ col: number; x: number; y: number; rot: number
   { col: 1, x: 40.494, y: 66.223, rot: 0 }, // /COL3 — outer edge
 ];
 
-/** PMW3610 centre = ball centre (thumb board U2). */
-const BALL_CENTRE: Vec2 = { x: 95.544, y: 54.824 };
-const BALL_BEZEL_R = 18;
-const BALL_R = 13;
+/**
+ * Main top-plate outline, from `v2/pcb/main-top.dxf` translated by
+ * (+73.5, +46.5) and simplified to 0.09mm. The staircase along the top and
+ * bottom edges is the real column stagger; the notch at the bottom around
+ * x=27..42 is where the hinge cover seats.
+ */
+const MAIN_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
+  [42.0, 41.5],
+  [42.0, 46.5],
+  [69.9, 46.5],
+  [70.13, 45.81],
+  [70.54, 45.21],
+  [71.1, 44.75],
+  [71.77, 44.45],
+  [72.49, 44.35],
+  [73.21, 44.45],
+  [73.88, 44.73],
+  [74.5, 45.26],
+  [74.5, -5.09],
+  [73.09, -6.5],
+  [61.61, -6.5],
+  [61.29, -5.64],
+  [60.63, -4.88],
+  [59.82, -4.45],
+  [58.82, -4.33],
+  [57.53, -4.77],
+  [56.63, -5.79],
+  [56.35, -7.13],
+  [56.5, -7.85],
+  [56.83, -8.5],
+  [41.5, -8.5],
+  [41.5, -9.09],
+  [40.09, -10.5],
+  [22.91, -10.5],
+  [21.5, -9.09],
+  [21.5, -6.5],
+  [7.18, -6.5],
+  [7.56, -5.67],
+  [7.64, -4.76],
+  [7.4, -3.87],
+  [6.87, -3.13],
+  [6.13, -2.6],
+  [5.24, -2.36],
+  [4.33, -2.44],
+  [3.5, -2.82],
+  [3.5, 2.5],
+  [-9.09, 2.5],
+  [-10.5, 3.91],
+  [-10.5, 71.09],
+  [-9.09, 72.5],
+  [7.89, 72.5],
+  [7.6, 71.73],
+  [7.57, 70.91],
+  [7.78, 70.11],
+  [8.29, 69.36],
+  [8.95, 68.86],
+  [9.82, 68.58],
+  [10.64, 68.59],
+  [11.5, 68.89],
+  [11.5, 46.5],
+  [27.0, 46.5],
+  [27.0, 39.5],
+  [40.5, 39.5],
+  [40.5, 41.5],
+];
 
 /**
- * The flat lid over the XIAO / battery bay. Purely decorative, and the
- * only element sized from the photo rather than CAD — the printed lid is
- * considerably larger than the U1 footprint underneath it.
+ * Thumb top-plate outline, from `v2/pcb/thumb-top.dxf` translated by
+ * (+79.164, +37.575) and simplified to 0.09mm.
+ *
+ * This is the shape the old build got badly wrong: it is not a uniform
+ * band around the keys. The rear edge runs flush with the outer key's
+ * opening, the front edge sweeps out in a long arc that widens toward the
+ * ball, the outer end is a near-straight cut, and the whole thing turns
+ * north at x≈83 into the neck that carries the XIAO and battery.
  */
-const COVER: CoverPlate = { side: 'left', x: 95.7, y: 24, width: 34, height: 31 };
+const THUMB_PLATE_OUTLINE: ReadonlyArray<readonly [number, number]> = [
+  [108.09, 61.07],
+  [108.09, 76.07],
+  [98.03, 94.51],
+  [94.04, 91.84],
+  [90.03, 89.39],
+  [86.02, 87.16],
+  [81.99, 85.14],
+  [77.95, 83.34],
+  [73.9, 81.76],
+  [69.82, 80.37],
+  [65.72, 79.18],
+  [61.57, 78.17],
+  [57.37, 77.34],
+  [53.1, 76.7],
+  [48.74, 76.26],
+  [44.28, 76.01],
+  [39.72, 75.96],
+  [35.06, 76.11],
+  [30.3, 76.45],
+  [29.42, 70.56],
+  [28.2, 58.72],
+  [29.51, 58.72],
+  [30.25, 59.16],
+  [31.09, 59.32],
+  [31.86, 59.22],
+  [32.76, 58.72],
+  [32.99, 58.72],
+  [32.99, 73.72],
+  [47.99, 73.72],
+  [47.99, 58.72],
+  [47.29, 58.72],
+  [47.29, 53.57],
+  [54.01, 54.08],
+  [57.35, 54.5],
+  [63.99, 55.65],
+  [67.28, 56.38],
+  [73.78, 58.15],
+  [76.99, 59.19],
+  [83.29, 61.57],
+  [83.29, 13.35],
+  [108.09, 13.35],
+];
 
-/** The little post joining the main plate to the thumb plate. */
-const POST: HingePost = { side: 'left', x: 36.5, y: 50, r: 4 };
+/**
+ * Trackball housing. Centre is `v2/case/trabo-case.stl`'s footprint centre
+ * mapped into this frame — 0.3mm off the PMW3610 footprint, which is the
+ * cross-check that the STL and KiCad frames agree. The housing measures
+ * 29.3 x 32.0mm, so it is very slightly oval; a 15.3mm radius splits it.
+ */
+const BALL_CENTRE: Vec2 = { x: 95.28, y: 54.77 };
+/** Housing outer radius: STL footprint is 29.3 x 32.0mm, photo reads 30.7. */
+const BALL_BEZEL_R = 15.4;
+/**
+ * Visible aperture, NOT the ball diameter. The printed cradle is a "C"
+ * whose lip overlaps the ball, so from above only ~22mm of the 25mm ball
+ * shows — which is what the photo measures.
+ */
+const BALL_R = 11.2;
+
+/** `v2/case/xiao-cover.stl`, mapped in. Runs under the ball housing. */
+const COVER: CoverPlate = { side: 'left', x: 95.28, y: 44.18, width: 29.5, height: 64.65 };
+
+/** `v2/case/hinji-cover.stl`, seated in the main plate's bottom notch. */
+const HINGE: Hinge = { side: 'left', x: 34.5, y: 49.4, width: 12, height: 5.2 };
 
 // ── Builders ──────────────────────────────────────────────────────────
+
+const toVec = (p: readonly [number, number]): Vec2 => ({ x: p[0], y: p[1] });
 
 function leftMainKeys(): BoardKey[] {
   const out: BoardKey[] = [];
@@ -201,86 +346,18 @@ function leftThumbKeys(): BoardKey[] {
   }));
 }
 
-/**
- * Staircase outline of the main plate: the top and bottom edges step at
- * every column boundary, which is exactly how the printed case looks.
- */
-function leftMainPlate(): Vec2[] {
-  const half = MAIN_PITCH / 2;
-  const first = MAIN_COLUMNS[0];
-  const last = MAIN_COLUMNS[MAIN_COLUMNS.length - 1];
-  if (!first || !last) return [];
-
-  const topOf = (c: (typeof MAIN_COLUMNS)[number]) => c.topY - MAIN_CAP / 2 - PLATE_PAD;
-  const botOf = (c: (typeof MAIN_COLUMNS)[number]) =>
-    c.topY + (c.rows - 1) * MAIN_PITCH + MAIN_CAP / 2 + PLATE_PAD;
-
-  const leftEdge = first.x - half - PLATE_PAD;
-  const rightEdge = last.x + half + PLATE_PAD;
-  // Column boundaries, with the outer two pushed out by the plate margin.
-  const bounds = MAIN_COLUMNS.map((c) => c.x + half);
-  bounds[bounds.length - 1] = rightEdge;
-
-  const pts: Vec2[] = [{ x: leftEdge, y: topOf(first) }];
-  MAIN_COLUMNS.forEach((c, i) => {
-    const edge = bounds[i] ?? rightEdge;
-    pts.push({ x: edge, y: topOf(c) });
-    const next = MAIN_COLUMNS[i + 1];
-    if (next) pts.push({ x: edge, y: topOf(next) });
-  });
-  // Down the right edge, then back along the stepped bottom.
-  pts.push({ x: rightEdge, y: botOf(last) });
-  for (let i = MAIN_COLUMNS.length - 1; i >= 0; i--) {
-    const c = MAIN_COLUMNS[i];
-    if (!c) continue;
-    const edge = i === 0 ? leftEdge : (bounds[i - 1] ?? leftEdge);
-    pts.push({ x: edge, y: botOf(c) });
-    const prev = MAIN_COLUMNS[i - 1];
-    if (prev) pts.push({ x: edge, y: botOf(prev) });
-  }
-  return pts;
-}
-
-/**
- * Centre line of the thumb band. The ends are extended past the outer
- * keys so the round caps fully cover them rather than clipping a corner.
- */
-function leftThumbBand(): ThumbBand {
-  const pts = [...THUMB_KEYS].sort((a, b) => a.x - b.x).map((k) => ({ x: k.x, y: k.y }));
-  const extend = (from: Vec2, to: Vec2, by: number): Vec2 => {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const len = Math.hypot(dx, dy) || 1;
-    return { x: to.x + (dx / len) * by, y: to.y + (dy / len) * by };
-  };
-  const first = pts[0];
-  const second = pts[1];
-  const lastPt = pts[pts.length - 1];
-  const penultimate = pts[pts.length - 2];
-  const line: Vec2[] = [];
-  if (first && second) line.push(extend(second, first, THUMB_CAP / 2));
-  line.push(...pts);
-  if (lastPt && penultimate) line.push(extend(penultimate, lastPt, THUMB_CAP / 2));
-  return { side: 'left', points: line, width: THUMB_CAP + PLATE_PAD * 2 };
-}
-
 // ── Mirroring ─────────────────────────────────────────────────────────
 
-interface Mirror {
-  /** x' = axis - x */
-  axis: number;
-}
+const mirrorPoint = (axis: number, p: Vec2): Vec2 => ({ x: axis - p.x, y: p.y });
 
-const mirrorPoint = (m: Mirror, p: Vec2): Vec2 => ({ x: m.axis - p.x, y: p.y });
-
-function mirrorKey(m: Mirror, k: BoardKey): BoardKey {
+function mirrorKey(axis: number, k: BoardKey): BoardKey {
   return {
     ...k,
     side: 'right',
     // Right column c occupies the position of left column 9 - c, so the
     // inverse mapping for a left key is simply 9 - col.
     col: 9 - k.col,
-    x: m.axis - k.x,
+    x: axis - k.x,
     y: k.y,
     rot: -k.rot,
   };
@@ -290,74 +367,62 @@ function mirrorKey(m: Mirror, k: BoardKey): BoardKey {
 
 function build(): BoardGeometry {
   const leftKeys = [...leftMainKeys(), ...leftThumbKeys()];
-  const leftPlate = leftMainPlate();
-  const leftBand = leftThumbBand();
+  const mainPoints = MAIN_PLATE_OUTLINE.map(toVec);
+  const thumbPoints = THUMB_PLATE_OUTLINE.map(toVec);
 
-  // Left-half extent, including plate margins and the ball housing.
+  // Left-half extent. The plates plus their rim bound everything else,
+  // except the ball housing, which pokes past the thumb plate's edge.
   const xs = [
-    ...leftPlate.map((p) => p.x),
-    ...leftBand.points.map((p) => p.x - leftBand.width / 2),
-    ...leftBand.points.map((p) => p.x + leftBand.width / 2),
+    ...mainPoints.map((p) => p.x),
+    ...thumbPoints.map((p) => p.x),
     BALL_CENTRE.x - BALL_BEZEL_R,
     BALL_CENTRE.x + BALL_BEZEL_R,
     COVER.x - COVER.width / 2,
     COVER.x + COVER.width / 2,
   ];
   const ys = [
-    ...leftPlate.map((p) => p.y),
-    ...leftBand.points.map((p) => p.y - leftBand.width / 2),
-    ...leftBand.points.map((p) => p.y + leftBand.width / 2),
+    ...mainPoints.map((p) => p.y),
+    ...thumbPoints.map((p) => p.y),
     BALL_CENTRE.y - BALL_BEZEL_R,
     BALL_CENTRE.y + BALL_BEZEL_R,
     COVER.y - COVER.height / 2,
     COVER.y + COVER.height / 2,
+    HINGE.y + HINGE.height / 2,
   ];
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
+  const minX = Math.min(...xs) - PLATE_RIM;
+  const maxX = Math.max(...xs) + PLATE_RIM;
+  const minY = Math.min(...ys) - PLATE_RIM;
+  const maxY = Math.max(...ys) + PLATE_RIM;
 
   // Mirror axis chosen so the right half starts HALF_GAP past the left one.
-  const mirror: Mirror = { axis: 2 * maxX + HALF_GAP };
+  const axis = 2 * maxX + HALF_GAP;
 
-  const keys = [...leftKeys, ...leftKeys.map((k) => mirrorKey(mirror, k))];
-  const plates: PlateOutline[] = [
-    { side: 'left', points: leftPlate },
-    { side: 'right', points: leftPlate.map((p) => mirrorPoint(mirror, p)) },
-  ];
-  const thumbBands: ThumbBand[] = [
-    leftBand,
-    {
-      side: 'right',
-      points: leftBand.points.map((p) => mirrorPoint(mirror, p)),
-      width: leftBand.width,
-    },
+  const keys = [...leftKeys, ...leftKeys.map((k) => mirrorKey(axis, k))];
+  const plates: Plate[] = [
+    { side: 'left', kind: 'main', points: mainPoints },
+    { side: 'left', kind: 'thumb', points: thumbPoints },
+    { side: 'right', kind: 'main', points: mainPoints.map((p) => mirrorPoint(axis, p)) },
+    { side: 'right', kind: 'thumb', points: thumbPoints.map((p) => mirrorPoint(axis, p)) },
   ];
   const balls: Trackball[] = [
     { side: 'left', ...BALL_CENTRE, bezel: BALL_BEZEL_R, ball: BALL_R },
-    {
-      side: 'right',
-      ...mirrorPoint(mirror, BALL_CENTRE),
-      bezel: BALL_BEZEL_R,
-      ball: BALL_R,
-    },
+    { side: 'right', ...mirrorPoint(axis, BALL_CENTRE), bezel: BALL_BEZEL_R, ball: BALL_R },
   ];
-  const covers: CoverPlate[] = [COVER, { ...COVER, side: 'right', x: mirror.axis - COVER.x }];
-  const posts: HingePost[] = [POST, { ...POST, side: 'right', x: mirror.axis - POST.x }];
+  const covers: CoverPlate[] = [COVER, { ...COVER, side: 'right', x: axis - COVER.x }];
+  const hinges: Hinge[] = [HINGE, { ...HINGE, side: 'right', x: axis - HINGE.x }];
 
-  // The right half's far edge is the mirror of the left half's near edge.
-  const width = mirror.axis - minX - minX;
   return {
     keys,
     plates,
-    thumbBands,
     balls,
     covers,
-    posts,
+    hinges,
     viewBox: {
       x: minX - VIEW_PAD,
+      // The right half is the mirror of the left, so the far edge sits at
+      // `axis - minX` and the total width follows from that.
       y: minY - VIEW_PAD,
-      width: width + VIEW_PAD * 2,
+      width: axis - minX - minX + VIEW_PAD * 2,
       height: maxY - minY + VIEW_PAD * 2,
     },
   };
@@ -366,7 +431,7 @@ function build(): BoardGeometry {
 /** The kobu2 board. Pure data — identical on every call. */
 export const KOBU2_BOARD: BoardGeometry = build();
 
-/** Total physical keys: 4x10 minus nothing — v2 fills every slot. */
+/** Total physical keys: 4x10 — v2 fills every slot. */
 export const KEY_COUNT = KOBU2_BOARD.keys.length;
 
 const KEY_INDEX = new Map<string, BoardKey>(KOBU2_BOARD.keys.map((k) => [`${k.row},${k.col}`, k]));

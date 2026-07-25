@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { KEY_COUNT, KOBU2_BOARD, keyAt, keysOfSide, MAIN_PITCH } from './geometry';
+import {
+  KEY_COUNT,
+  KOBU2_BOARD,
+  keyAt,
+  keysOfSide,
+  MAIN_PITCH,
+  type Side,
+  type Vec2,
+} from './geometry';
+
+/** Ray-casting point-in-polygon. */
+function inside(poly: ReadonlyArray<Vec2>, p: Vec2): boolean {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (!a || !b) continue;
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      hit = !hit;
+    }
+  }
+  return hit;
+}
+
+const plateFor = (side: Side, kind: 'main' | 'thumb') =>
+  KOBU2_BOARD.plates.find((p) => p.side === side && p.kind === kind);
 
 describe('kobu2 board geometry', () => {
   it('has one key per matrix slot of the 4x10 layout', () => {
@@ -99,6 +124,86 @@ describe('kobu2 board geometry', () => {
       expect(k.x + r).toBeLessThanOrEqual(viewBox.x + viewBox.width);
       expect(k.y - r).toBeGreaterThanOrEqual(viewBox.y);
       expect(k.y + r).toBeLessThanOrEqual(viewBox.y + viewBox.height);
+    }
+  });
+
+  /*
+   * The plate outlines come from the case DXFs, registered to the KiCad
+   * switch coordinates by a translation. If that registration ever drifts
+   * — a re-export, a changed offset — keys start floating outside their
+   * plate. These two are the guard.
+   */
+  it('keeps every main key, cap corners included, on the main plate', () => {
+    for (const k of KOBU2_BOARD.keys.filter((k) => k.kind === 'main')) {
+      const plate = plateFor(k.side, 'main');
+      expect(plate, `no main plate for ${k.side}`).toBeDefined();
+      if (!plate) continue;
+      const r = k.size / 2;
+      const corners: Vec2[] = [
+        k,
+        { x: k.x - r, y: k.y - r },
+        { x: k.x + r, y: k.y - r },
+        { x: k.x + r, y: k.y + r },
+        { x: k.x - r, y: k.y + r },
+      ];
+      for (const c of corners) {
+        expect(inside(plate.points, c), `(${k.row},${k.col}) hangs off the main plate`).toBe(true);
+      }
+    }
+  });
+
+  /**
+   * The outer thumb key's 15mm opening is traced as an axis-aligned notch
+   * in the thumb outline — real DXF geometry, not something derived from
+   * the key list. Asserting the notch is centred on key (3,1) pins the DXF
+   * against the KiCad switch coordinates, so a bad re-export or a changed
+   * offset fails here rather than silently skewing the picture.
+   */
+  it('lands the thumb plate’s outer key notch exactly on that key', () => {
+    for (const [side, col] of [
+      ['left', 1],
+      ['right', 8],
+    ] as const) {
+      const plate = plateFor(side, 'thumb');
+      const key = keyAt(3, col);
+      expect(plate).toBeDefined();
+      expect(key).toBeDefined();
+      if (!plate || !key) continue;
+
+      // Find four consecutive points forming a 15 x 15 axis-aligned box.
+      const pts = plate.points;
+      let found: Vec2 | null = null;
+      for (let i = 0; i < pts.length; i++) {
+        const q = [0, 1, 2, 3].map((d) => pts[(i + d) % pts.length]);
+        const [a, b, c, d] = q;
+        if (!a || !b || !c || !d) continue;
+        const w = Math.abs(c.x - a.x);
+        const h = Math.abs(c.y - a.y);
+        const axisAligned =
+          Math.abs(a.x - b.x) < 1e-6 && Math.abs(b.y - c.y) < 1e-6 && Math.abs(c.x - d.x) < 1e-6;
+        if (axisAligned && Math.abs(w - 15) < 1e-6 && Math.abs(h - 15) < 1e-6) {
+          found = { x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 };
+          break;
+        }
+      }
+      expect(found, `no 15mm notch in the ${side} thumb outline`).not.toBeNull();
+      if (!found) continue;
+      // The outline is stored to 2dp, so 5µm is the tightest this can be.
+      expect(found.x).toBeCloseTo(key.x, 2);
+      expect(found.y).toBeCloseTo(key.y, 2);
+    }
+  });
+
+  it('hugs every thumb key with the thumb plate', () => {
+    for (const k of KOBU2_BOARD.keys.filter((k) => k.kind === 'thumb')) {
+      const plate = plateFor(k.side, 'thumb');
+      if (!plate) throw new Error('missing thumb plate');
+      // Nearest outline vertex. A mis-registered plate would leave keys
+      // stranded far away; a correct one always has material close by.
+      const nearest = Math.min(...plate.points.map((p) => Math.hypot(p.x - k.x, p.y - k.y)));
+      expect(nearest, `(${k.row},${k.col}) is ${nearest.toFixed(1)}mm from its plate`).toBeLessThan(
+        14,
+      );
     }
   });
 
