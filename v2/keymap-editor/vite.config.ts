@@ -6,8 +6,8 @@ import { defineConfig } from 'vite';
 
 // kobu2-keymap-editor is a pure client-side app: every byte it exchanges
 // with the keyboard goes over WebHID, so there is no backend and no proxy
-// to configure. `base` stays '/' — see v2/web/README.md if this app ever
-// gets mounted under a sub-path on the shared Worker.
+// to configure. `base` stays '/' here; the deploy build overrides it with
+// `--base=/v2/` for the shared Worker — see .github/workflows/web.yml.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   test: {

@@ -6,7 +6,7 @@ kobu2（v2）のキーマップとトラックボール設定を、ブラウザ�
 
 - 公開先: `https://kobu-editor.digletts.dev/v2/`（v1 と同じ Worker の `/v2` 配下）
 - 対象: **kobu2 のみ**（USB PID `0x425A`）。初代 kobu はキー配列が違うので
-  [`../../../v1/web/rmk-editor`](../../../v1/web/rmk-editor) を使ってください。
+  [`../../v1/web/rmk-editor`](../../v1/web/rmk-editor) を使ってください。
 - 必要環境: WebHID が使えるデスクトップブラウザ（Chrome / Edge など Chromium 系）
 
 ![kobu2 実機](docs/kobu2-reference.jpg)
@@ -29,7 +29,7 @@ kobu2（v2）のキーマップとトラックボール設定を、ブラウザ�
 Node / pnpm はリポジトリルートの flake が固定しています。
 
 ```sh
-cd v2/web/keymap-editor     # direnv が #web devshell を起動
+cd v2/keymap-editor         # direnv がルートの devshell (Node + pnpm) を起動
 pnpm install
 pnpm dev                    # http://localhost:5173
 pnpm test                   # vitest
