@@ -24,6 +24,11 @@ export function ConnectGate({ onDemo }: { onDemo: () => void }) {
         kobu2 を USB で接続し、下のボタンを押して表示されたリストから選択してください。
         キーマップとトラックボールの設定を、この画面から直接編集できます。
       </p>
+      <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted">
+        USB ケーブルは<span className="font-medium text-ink">左手側（セントラル）</span>に挿してください。
+        右手側は USB デバイスとして現れません — 右手のキーは、右手が左手に BLE
+        で繋がっていれば（接続時に右手の LED が青く光ります）この画面からテストできます。
+      </p>
 
       {unsupported ? (
         <div className="mt-8 rounded-2xl border border-danger/40 bg-panel px-5 py-4 text-sm text-ink">

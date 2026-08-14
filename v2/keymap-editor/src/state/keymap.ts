@@ -13,7 +13,7 @@ import { create } from 'zustand';
 import { DEMO_COLS, DEMO_LAYERS, DEMO_ROWS, demoKeymap } from '../board/demoKeymap';
 import type { KeyboardLayoutDef } from '../protocol/handshake';
 import { fetchKeymap, fetchLayerCount, type Keymap, setKeycode } from '../protocol/keymap';
-import { fetchUnlockStatus, performUnlock } from '../protocol/unlock';
+import { fetchUnlockStatus } from '../protocol/unlock';
 import { runOnDevice } from './connection';
 
 export interface CellRef {
@@ -122,7 +122,7 @@ export const useKeymapStore = create<KeymapStore>((set, get) => ({
         dirty: new Set<string>(),
         layer: Math.min(s.layer, Math.max(result.layers - 1, 0)),
         unlock: {
-          phase: result.status.locked ? 'unknown' : 'unlocked',
+          phase: result.status.unlocked ? 'unlocked' : 'unknown',
           chord: result.status.chord,
           remaining: 0,
         },
@@ -197,30 +197,27 @@ export const useKeymapStore = create<KeymapStore>((set, get) => ({
 
     try {
       await runOnDevice(async (t) => {
-        // Vial refuses keymap writes on a locked board, so clear that
-        // first — the whole unlock dance stays inside this one queued
-        // slot so nothing else can slip onto the wire mid-chord.
+        /*
+         * No unlock chord here, deliberately. Vial's convention is to
+         * unlock before touching the keymap, but rmk 0.8.2 gates exactly
+         * one thing on the lock — the `SwitchMatrixState` reply read by
+         * the 通電テスト panel (`host/via/mod.rs:140`, the only
+         * `is_unlocked()` call site in the crate). `DynamicKeymapSetKeyCode`
+         * writes straight through, so demanding a two-handed chord before
+         * every save would cost the user something and buy nothing.
+         *
+         * We still record the lock state for display; if a future rmk
+         * starts gating writes, they will fail loudly here rather than
+         * silently, because the firmware echoes the request back.
+         */
         const status = await fetchUnlockStatus(t);
-        if (status.locked) {
-          set({
-            unlock: { phase: 'holding', chord: status.chord, remaining: 60 },
-          });
-          try {
-            await performUnlock(t, {
-              onTick: (_result, ticksRemaining) => {
-                set((s) => ({ unlock: { ...s.unlock, remaining: ticksRemaining } }));
-              },
-            });
-          } catch (err) {
-            set((s) => ({ unlock: { ...s.unlock, phase: 'failed', remaining: 0 } }));
-            throw err instanceof Error && err.message === 'unlock-timeout'
-              ? new Error(
-                  'ロック解除できませんでした。左右の外側の小指キーを押したまま、もう一度お試しください。',
-                )
-              : err;
-          }
-        }
-        set((s) => ({ unlock: { ...s.unlock, phase: 'unlocked', remaining: 0 } }));
+        set((s) => ({
+          unlock: {
+            ...s.unlock,
+            phase: status.unlocked ? 'unlocked' : 'unknown',
+            chord: status.chord,
+          },
+        }));
 
         for (const cell of cells) {
           const code = draft[cell.layer]?.[cell.row]?.[cell.col];

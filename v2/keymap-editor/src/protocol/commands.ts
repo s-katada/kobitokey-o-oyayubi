@@ -208,11 +208,17 @@ export function buildUnlockStart(): VialPacket {
 
 /**
  * Vial `UnlockPoll` — call every ~100 ms while the unlock chord is
- * being held. Returns:
+ * being held. Per `rmk-0.8.2/src/host/via/vial.rs::UnlockPoll`:
  *
- *   reply[0] = locked (1) or unlocked (0)
+ *   reply[0] = unlocked flag (**1 = unlocked**, 0 = locked)
  *   reply[1] = unlock-in-progress flag
- *   reply[2] = remaining counter (counts down to 0)
+ *   reply[2] = chord keys NOT yet held (`check_unlock()`), so it falls
+ *              to 0 as the user presses them — it is not a timer
+ *
+ * ⚠ The firmware writes `reply[0]` *before* running `check_unlock()`,
+ * so the poll that completes the chord still reports locked; the next
+ * one reports unlocked. Callers must keep polling until `unlocked`,
+ * not stop at `keysRemaining === 0`.
  */
 export function buildUnlockPoll(): VialPacket {
   const p = emptyPacket();
@@ -400,7 +406,16 @@ export function parseGetBufferPayload(reply: VialPacket): Uint8Array {
 }
 
 export interface UnlockStatus {
-  locked: boolean;
+  /**
+   * ⚠ Stored as `unlocked`, not `locked`, because that is the byte the
+   * firmware actually sends — `report.input_data[0] = locker.is_unlocked()`
+   * (`rmk-0.8.2/src/host/via/vial.rs`). Naming the field after the wire
+   * value is what keeps the polarity from being flipped again: it was,
+   * once, and the symptom was invisible (a locked board reports 0, the
+   * editor read that as "unlocked", skipped the chord, and every
+   * `SwitchMatrixState` read came back empty).
+   */
+  unlocked: boolean;
   inProgress: boolean;
   /** Physical (row, col) positions that make up the unlock chord. */
   chord: Array<{ row: number; col: number }>;
@@ -409,12 +424,13 @@ export interface UnlockStatus {
 /**
  * Parse the response from `GetUnlockStatus`. RMK's `VialLock` writes:
  *
- *   reply[0]     locked flag
+ *   reply[0]     unlocked flag (1 = unlocked)
  *   reply[1]     in-progress flag
- *   reply[2..]   pairs of (row, col); (0xff, 0xff) marks end of list.
+ *   reply[2..]   pairs of (row, col); the buffer is pre-filled with 0xff,
+ *                so (0xff, 0xff) marks the end of the list.
  */
 export function parseUnlockStatus(reply: VialPacket): UnlockStatus {
-  const locked = (reply[0] ?? 1) !== 0;
+  const unlocked = (reply[0] ?? 0) === 1;
   const inProgress = (reply[1] ?? 0) !== 0;
   const chord: Array<{ row: number; col: number }> = [];
   for (let i = 2; i + 1 < reply.length; i += 2) {
@@ -423,20 +439,22 @@ export function parseUnlockStatus(reply: VialPacket): UnlockStatus {
     if (row === 0xff && col === 0xff) break;
     chord.push({ row, col });
   }
-  return { locked, inProgress, chord };
+  return { unlocked, inProgress, chord };
 }
 
 export interface UnlockPollResult {
-  locked: boolean;
+  /** 1 = unlocked on the wire — see `UnlockStatus.unlocked`. */
+  unlocked: boolean;
   inProgress: boolean;
-  remaining: number;
+  /** Chord keys not yet held. Counts down to 0 as they go down. */
+  keysRemaining: number;
 }
 
 export function parseUnlockPoll(reply: VialPacket): UnlockPollResult {
   return {
-    locked: (reply[0] ?? 1) !== 0,
+    unlocked: (reply[0] ?? 0) === 1,
     inProgress: (reply[1] ?? 0) !== 0,
-    remaining: reply[2] ?? 0,
+    keysRemaining: reply[2] ?? 0,
   };
 }
 

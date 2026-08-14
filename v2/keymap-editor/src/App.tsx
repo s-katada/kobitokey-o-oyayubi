@@ -5,18 +5,21 @@ import { ConnectGate } from './components/ConnectGate';
 import { Header } from './components/Header';
 import { KeyPicker } from './components/KeyPicker';
 import { LayerBar } from './components/LayerBar';
+import { MatrixTestPanel } from './components/MatrixTestPanel';
 import { SaveBar } from './components/SaveBar';
 import { TuningPanel } from './components/TuningPanel';
 import { Button, Chip } from './components/ui';
 import { useConnectionStore, watchDeviceDisconnect } from './state/connection';
 import { dirtyLayers, dirtyOnLayer, useKeymapStore } from './state/keymap';
+import { useMatrixTestStore } from './state/matrixTest';
 import { useTuningStore } from './state/tuning';
 
-type Tab = 'keymap' | 'tuning';
+type Tab = 'keymap' | 'tuning' | 'test';
 
 const TABS: ReadonlyArray<{ id: Tab; label: string; hint: string }> = [
   { id: 'keymap', label: 'キーマップ', hint: 'キーを押して割り当てを変更' },
   { id: 'tuning', label: 'チューニング', hint: 'カーソル速度など' },
+  { id: 'test', label: '通電テスト', hint: '全キーが反応するか確かめる' },
 ];
 
 function KeymapTab() {
@@ -111,6 +114,7 @@ export default function App() {
   const loadTuning = useTuningStore((s) => s.load);
   const loadTuningDemo = useTuningStore((s) => s.loadDemo);
   const resetTuning = useTuningStore((s) => s.reset);
+  const resetMatrixTest = useMatrixTestStore((s) => s.reset);
 
   const [tab, setTab] = useState<Tab>('keymap');
   const [demo, setDemo] = useState(false);
@@ -126,6 +130,9 @@ export default function App() {
   useEffect(() => {
     if (state.kind === 'ready') {
       setDemo(false);
+      // A fresh board starts a fresh test — including dropping a demo
+      // session that was running before it was plugged in.
+      resetMatrixTest();
       const definition = state.handshake.definition;
       void (async () => {
         await loadKeymap(definition);
@@ -133,11 +140,14 @@ export default function App() {
       })();
       return;
     }
+    // A disconnect must also kill the matrix-test poll loop, or it would
+    // keep firing at a transport that is gone.
+    resetMatrixTest();
     if (!demo) {
       resetKeymap();
       resetTuning();
     }
-  }, [state, demo, loadKeymap, loadTuning, resetKeymap, resetTuning]);
+  }, [state, demo, loadKeymap, loadTuning, resetKeymap, resetTuning, resetMatrixTest]);
 
   const startDemo = useCallback(() => {
     loadKeymapDemo();
@@ -149,7 +159,8 @@ export default function App() {
     setDemo(false);
     resetKeymap();
     resetTuning();
-  }, [resetKeymap, resetTuning]);
+    resetMatrixTest();
+  }, [resetKeymap, resetTuning, resetMatrixTest]);
 
   const showEditor = state.kind === 'ready' || demo;
 
@@ -166,7 +177,13 @@ export default function App() {
               </Chip>
             ))}
           </div>
-          {tab === 'keymap' ? <KeymapTab /> : <TuningPanel />}
+          {tab === 'keymap' ? (
+            <KeymapTab />
+          ) : tab === 'tuning' ? (
+            <TuningPanel />
+          ) : (
+            <MatrixTestPanel />
+          )}
         </main>
       ) : (
         <ConnectGate onDemo={startDemo} />

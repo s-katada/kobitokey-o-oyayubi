@@ -6,19 +6,24 @@
  * `[[0, 0], [0, 9]]` — both outer pinkies, defined in
  * `firmware/keyboard.toml`.
  *
- * The state machine, in firmware terms:
- *   * GetUnlockStatus     returns current locked-ness and the chord
- *   * UnlockStart         arms a countdown; firmware now expects
- *                         UnlockPoll requests while the user is
- *                         holding the chord
- *   * UnlockPoll          decrements the counter while the chord
- *                         remains held; returns 0 remaining when
- *                         unlocked
+ * The state machine, in firmware terms
+ * (`rmk-0.8.2/src/host/via/vial_lock.rs`):
+ *   * GetUnlockStatus     returns whether the board is unlocked, plus
+ *                         the chord
+ *   * UnlockStart         arms the state machine; it disarms itself
+ *                         100 ms after the last poll, so polling has
+ *                         to be continuous
+ *   * UnlockPoll          reports how many chord keys are still up, and
+ *                         flips the board to unlocked once none are
  *   * Lock                re-engage manually
  *
- * vial-gui polls every 100 ms with a 50-tick total budget so the
- * full unlock takes ~5 s of held chord. We mirror those numbers
- * unless overridden.
+ * Unlike vial-gui's 5-second hold, rmk unlocks the moment every chord
+ * key is down — the budget here is just how long we wait for the user
+ * to get their fingers there.
+ *
+ * ⚠ Only ONE thing is gated on the lock in rmk 0.8.2: the
+ * `SwitchMatrixState` reply that the 通電テスト panel reads
+ * (`host/via/mod.rs:140`). Keymap writes are not gated.
  */
 
 import type { WebHidTransport } from '../transport/webhid';
@@ -34,7 +39,7 @@ import {
 } from './commands';
 
 export const DEFAULT_POLL_INTERVAL_MS = 100;
-/** Maximum ticks we'll poll before giving up — 50 ticks × 100 ms = 5 s. */
+/** Maximum polls before giving up — 60 × 100 ms = 6 s to get set. */
 export const DEFAULT_POLL_BUDGET = 60;
 
 export async function fetchUnlockStatus(transport: WebHidTransport): Promise<UnlockStatus> {
@@ -92,7 +97,10 @@ export async function performUnlock(
     if (options.signal?.aborted) throw new Error('cancelled');
     const result = await pollUnlock(transport);
     options.onTick?.(result, budget - tick - 1);
-    if (!result.locked) return result;
+    // Not `keysRemaining === 0`: the firmware evaluates the chord after
+    // it has already written the flag, so the unlock shows up one poll
+    // later. See `buildUnlockPoll`.
+    if (result.unlocked) return result;
     await sleep(pollIntervalMs, options.signal);
   }
   throw new Error('unlock-timeout');

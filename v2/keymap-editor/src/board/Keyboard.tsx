@@ -21,6 +21,12 @@ export interface KeyPosition {
   col: number;
 }
 
+/**
+ * Cap wash used by the 通電テスト panel: `pressed` = the switch is closed
+ * right now, `seen` = it has answered at least once.
+ */
+export type CapTint = 'pressed' | 'seen';
+
 export interface KeyboardProps {
   /** Layer whose legends are drawn. */
   layer: number;
@@ -31,6 +37,8 @@ export interface KeyboardProps {
   selected: KeyPosition | null;
   /** Positions edited locally but not yet written to the keyboard. */
   dirty?: ReadonlySet<string> | undefined;
+  /** Per-key wash, keyed by `keyId(row, col)`. */
+  tints?: ReadonlyMap<string, CapTint> | undefined;
   onSelect: (pos: KeyPosition) => void;
   /** Fired on Enter/Space or a second click on the selected key. */
   onActivate?: ((pos: KeyPosition) => void) | undefined;
@@ -47,12 +55,19 @@ function fitFont(text: string, size: number, base: number): number {
   return Math.max(base * 0.45, (budget / Math.max(text.length, 1)) * (1 / 0.56));
 }
 
+/** Wash colour and strength per tint. Strength keeps the legend legible. */
+const TINT_STYLE: Record<CapTint, { fill: string; opacity: number; label: string }> = {
+  pressed: { fill: 'var(--color-accent)', opacity: 0.9, label: '押されています' },
+  seen: { fill: 'var(--color-ok)', opacity: 0.42, label: '反応を確認済み' },
+};
+
 interface CapProps {
   k: BoardKey;
   code: number;
   definition?: KeyboardLayoutDef | undefined;
   selected: boolean;
   dirty: boolean;
+  tint?: CapTint | undefined;
   onSelect: (pos: KeyPosition) => void;
   onActivate?: ((pos: KeyPosition) => void) | undefined;
 }
@@ -63,6 +78,7 @@ const Cap = memo(function Cap({
   definition,
   selected,
   dirty,
+  tint,
   onSelect,
   onActivate,
 }: CapProps) {
@@ -98,7 +114,9 @@ const Cap = memo(function Cap({
     <g
       role="button"
       tabIndex={0}
-      aria-label={`${k.side === 'left' ? '左' : '右'} 行${k.row} 列${k.col}: ${label.long}`}
+      aria-label={`${k.side === 'left' ? '左' : '右'} 行${k.row} 列${k.col}: ${label.long}${
+        tint ? ` — ${TINT_STYLE[tint].label}` : ''
+      }`}
       aria-pressed={selected}
       data-key={keyId(k.row, k.col)}
       transform={`translate(${k.x} ${k.y}) rotate(${k.rot})`}
@@ -129,6 +147,18 @@ const Cap = memo(function Cap({
         rx={1.7}
         fill={selected ? 'var(--color-accent)' : 'url(#kb-cap-top)'}
       />
+      {/* Test-mode wash, under the legend so the key stays readable. */}
+      {tint && (
+        <rect
+          x={-half + inset}
+          y={-half + inset - topLift}
+          width={s - inset * 2}
+          height={s - inset * 2}
+          rx={1.7}
+          fill={TINT_STYLE[tint].fill}
+          fillOpacity={TINT_STYLE[tint].opacity}
+        />
+      )}
       {/* Hover wash — kept above the face so it tints the gradient. */}
       <rect
         className="opacity-0 transition-opacity duration-100 group-hover/board:opacity-0 hover:opacity-100"
@@ -234,6 +264,7 @@ export function Keyboard({
   definition,
   selected,
   dirty,
+  tints,
   onSelect,
   onActivate,
 }: KeyboardProps) {
@@ -378,6 +409,7 @@ export function Keyboard({
             definition={definition}
             selected={selected?.row === k.row && selected?.col === k.col}
             dirty={dirty?.has(keyId(k.row, k.col)) ?? false}
+            tint={tints?.get(keyId(k.row, k.col))}
             onSelect={onSelect}
             onActivate={onActivate}
           />
