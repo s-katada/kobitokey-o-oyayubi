@@ -282,6 +282,18 @@ fn main() {
     // patch ⇒ one `cargo clean --release -p rmk` before the next build.
     patch_rmk_typing_tick();
 
+    // Dongle topology (Prospector, 2026-08): the ONE registry hook that lets a
+    // 2-peripheral dongle central tell its halves apart (rmk strips the
+    // peripheral id before re-injecting forwarded events), plus a wider
+    // connect timeout so two peripheral managers sharing SCANNING_MUTEX don't
+    // clear each other's stored addresses at cold boot. Both patches are
+    // runtime-inert for the classic left-central topology: the id-gated branch
+    // only fires for id != 0 and the classic build's only peripheral is id 0.
+    // NEW registry patches ⇒ one `cargo clean --release -p rmk` first.
+    patch_rmk_peripheral_manager_source_disambiguation();
+    patch_rmk_split_connect_timeout_widen();
+    patch_rmk_split_adv_set_token();
+
     generate_vial_config();
 
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
@@ -7020,4 +7032,298 @@ pub static KOBU_AUTO_MOUSE_LAYER: core::sync::atomic::AtomicU8 = core::sync::ato
     fs::write(&path, contents).unwrap_or_else(|e| {
         panic!("kobu: failed to write {}: {e}", path.display());
     });
+}
+
+/// Dongle 1/2: per-peripheral source disambiguation in `PeripheralManager::read_event`.
+///
+/// rmk 0.8.2 re-injects a peripheral's forwarded `Event`s into the central's
+/// `EVENT_CHANNEL` with the peripheral id stripped (`split/driver.rs`,
+/// `Ok(SplitMessage::Event(event)) => return event;`), so a dongle central
+/// serving TWO trackball halves cannot tell left from right: both balls arrive
+/// as `Joystick(X/Y)` and both batteries as untagged `Battery(u16)`. This
+/// patches the ONE place that still knows the source (`self.id`):
+///
+///   * `id != 0` (the LEFT half on the kobu2 dongle topology, `#[rmk_peripheral(id = 1)]`):
+///     - `Joystick` axes are relabeled X→H, Y→V *at ingest*, exactly the
+///       transform `src/trackball.rs::AxisRelabel` applies to the central-local
+///       ball on the classic topology. ScrollProcessor then claims H/V (left
+///       ball = scroll) and PointerProcessor claims X/Y (right ball = pointer)
+///       with no further changes.
+///     - `Battery(raw)` gains bit 0x4000 (the XIAO SAADC is 12-bit, so bits
+///       15..12 are free; 0x8000 is already taken by the classic central's
+///       own-sample tag in `src/battery_source.rs`). The dongle's chain-head
+///       router uses it to store left vs right percentages in the SAME
+///       `KOBU_CENTRAL/PERIPHERAL_BATTERY_PERCENT` atomics the Via 0xC0
+///       handler (ids 0x10/0x11) already reports, so kobu-config keeps
+///       reading 0x10 = left, 0x11 = right unchanged.
+///
+///   * `id == 0` (the RIGHT half — and the ONLY peripheral of the classic
+///     left-central topology) passes through untouched, which keeps this
+///     patch fully inert for the existing kobu2-rmk-central/peripheral UF2s.
+fn patch_rmk_peripheral_manager_source_disambiguation() {
+    const MARKER: &str = "// kobu: peripheral-manager source disambiguation (dongle) applied";
+    const RMK_VERSION: &str = "0.8.2";
+
+    let Some(path) = find_rmk_file(RMK_VERSION, "src/split/driver.rs") else {
+        println!(
+            "cargo:warning=kobu: could not find rmk-{RMK_VERSION} split/driver.rs; \
+             peripheral-manager source disambiguation patch was not applied"
+        );
+        return;
+    };
+
+    println!("cargo:rerun-if-changed={}", path.display());
+
+    let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("kobu: failed to read {}: {e}", path.display());
+    });
+
+    if contents.contains(MARKER) {
+        return;
+    }
+
+    let from = r#"                Ok(SplitMessage::Event(event)) => {
+                    if CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire) {
+                        return event;"#;
+    let to = r#"                Ok(SplitMessage::Event(mut event)) => {
+                    if CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire) {
+                        // kobu dongle: rmk strips the peripheral id before re-injecting
+                        // forwarded events into EVENT_CHANNEL, so a 2-peripheral dongle
+                        // cannot tell its halves apart downstream. Encode the source here
+                        // (the one place that still knows `self.id`): id != 0 is the LEFT
+                        // half on the dongle topology — its ball is the scroll ball, so
+                        // relabel Joystick X→H / Y→V (the AxisRelabel transform), and tag
+                        // its Battery with bit 0x4000 (12-bit SAADC never uses it). id 0
+                        // (the RIGHT half, and the classic topology's only peripheral)
+                        // passes through untouched, keeping this inert for the classic
+                        // left-central builds.
+                        if self.id != 0 {
+                            match &mut event {
+                                crate::event::Event::Joystick(axes) => {
+                                    for ax in axes.iter_mut() {
+                                        ax.axis = match ax.axis {
+                                            crate::event::Axis::X => crate::event::Axis::H,
+                                            crate::event::Axis::Y => crate::event::Axis::V,
+                                            other => other,
+                                        };
+                                    }
+                                }
+                                crate::event::Event::Battery(raw) => {
+                                    *raw |= 0x4000;
+                                }
+                                _ => {}
+                            }
+                        }
+                        return event;"#;
+    if !contents.contains(from) {
+        panic!(
+            "kobu: expected the `Ok(SplitMessage::Event(event))` forward block in \
+             rmk-{RMK_VERSION} split/driver.rs at {}; upstream may have changed — update \
+             firmware/build.rs::patch_rmk_peripheral_manager_source_disambiguation",
+            path.display()
+        );
+    }
+    contents = contents.replace(from, to);
+
+    contents.push('\n');
+    contents.push_str(MARKER);
+    contents.push('\n');
+
+    fs::write(&path, contents).unwrap_or_else(|e| {
+        panic!("kobu: failed to write {}: {e}", path.display());
+    });
+}
+
+/// Dongle 2/2: widen the split-central connect timeout 5 s → 12 s.
+///
+/// With two `run_ble_peripheral_manager` tasks (a dongle serving both halves),
+/// both serialize their `central.connect()` behind the global SCANNING_MUTEX,
+/// but each keeps its own 5 s `with_timeout` running WHILE waiting for the
+/// mutex — the loser's budget includes the winner's whole connect. On timeout
+/// the `Err(_)` arm clears that peripheral's STORED address, forcing a full
+/// re-scan/re-pair cycle: a cold boot with both halves advertising could ping-
+/// pong between the managers. 12 s gives the loser comfortable headroom. For
+/// the classic 1-peripheral topology the mutex is uncontended and the timeout
+/// almost never fires, so the widening is behaviorally invisible there (a
+/// genuinely-absent half just waits 12 s instead of 5 s before re-scanning).
+fn patch_rmk_split_connect_timeout_widen() {
+    const MARKER: &str = "// kobu: split central connect timeout 5s -> 12s applied";
+    const RMK_VERSION: &str = "0.8.2";
+
+    let Some(path) = find_rmk_file(RMK_VERSION, "src/split/ble/central.rs") else {
+        println!(
+            "cargo:warning=kobu: could not find rmk-{RMK_VERSION} split/ble/central.rs; \
+             split connect timeout widen patch was not applied"
+        );
+        return;
+    };
+
+    println!("cargo:rerun-if-changed={}", path.display());
+
+    let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("kobu: failed to read {}: {e}", path.display());
+    });
+
+    if contents.contains(MARKER) {
+        return;
+    }
+
+    // Unique: the only `with_timeout(Duration::from_secs(5)` in the file — the
+    // other `from_secs(5)` is defaul_central_conn_param's supervision_timeout.
+    let from = "match with_timeout(Duration::from_secs(5), async {";
+    let to = "match with_timeout(Duration::from_secs(12), async { // kobu: was 5s; see patch_rmk_split_connect_timeout_widen";
+    if !contents.contains(from) {
+        panic!(
+            "kobu: expected `{from}` in rmk-{RMK_VERSION} split/ble/central.rs at {}; \
+             upstream may have changed — update firmware/build.rs::patch_rmk_split_connect_timeout_widen",
+            path.display()
+        );
+    }
+    contents = contents.replace(from, to);
+
+    contents.push('\n');
+    contents.push_str(MARKER);
+    contents.push('\n');
+
+    fs::write(&path, contents).unwrap_or_else(|e| {
+        panic!("kobu: failed to write {}: {e}", path.display());
+    });
+}
+
+/// Dongle (multi-set independence): per-set token in the split advertisement.
+///
+/// Stock rmk peripherals advertise (service UUID 4dd5fbaa-…, manufacturer
+/// 0xe118, payload = [peripheral_id]) and the central's ScanHandler matches
+/// exactly that — there is NO per-keyboard discriminator, so any unbonded
+/// kobu-family half can be grabbed by any scanning kobu-family central (the
+/// v1-left-steals-v2-right incident). Bonded pairs are already safe: the
+/// peripheral switches to DIRECTED advertising at its stored central and the
+/// central connects by stored address without scanning. This patch closes the
+/// PAIRING-TIME hole:
+///
+///   * injects `KOBU_SPLIT_SET_TOKEN: AtomicU8` (default 0 = stock wire
+///     behavior, so classic-topology binaries are bit-identical on air);
+///   * peripheral: when the token is nonzero, the manufacturer payload
+///     becomes `[id, token]` (AD length byte 0x04 → 0x05);
+///   * central scanner: when the token is nonzero it requires the 0x05
+///     layout AND a matching token byte; when zero it requires the stock
+///     0x04 layout. The AD length byte makes the two formats MUTUALLY
+///     INVISIBLE — a token'd dongle set and a stock v1/v2-classic keyboard
+///     can never cross-pair, and different tokens never match each other.
+///
+/// Also hardens the stock scanner's latent panic: `len < 25` guarded but
+/// `data[25]` read ⇒ an exactly-25-byte matching report would index OOB;
+/// the guard becomes `len < 26`.
+fn patch_rmk_split_adv_set_token() {
+    const MARKER: &str = "// kobu: split adv set-token applied";
+    const RMK_VERSION: &str = "0.8.2";
+
+    // 1/3: the token atomic, injected with the other KOBU_* statics.
+    {
+        let Some(path) = find_rmk_file(RMK_VERSION, "src/input_device/battery.rs") else {
+            println!(
+                "cargo:warning=kobu: could not find rmk-{RMK_VERSION} input_device/battery.rs; \
+                 split adv set-token patch was not applied"
+            );
+            return;
+        };
+        println!("cargo:rerun-if-changed={}", path.display());
+        let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!("kobu: failed to read {}: {e}", path.display());
+        });
+        if !contents.contains(MARKER) {
+            let anchor = "pub static KOBU_PERIPHERAL_SAMPLES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);";
+            let injected = "pub static KOBU_PERIPHERAL_SAMPLES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);\n\
+/// kobu: per-keyboard-set token carried in the split advertisement (0 = stock\n\
+/// wire format / stock matching). Set at boot by dongle-topology binaries; see\n\
+/// build.rs::patch_rmk_split_adv_set_token.\n\
+pub static KOBU_SPLIT_SET_TOKEN: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);";
+            if !contents.contains(anchor) {
+                panic!(
+                    "kobu: expected the KOBU_PERIPHERAL_SAMPLES static in rmk-{RMK_VERSION} \
+                     input_device/battery.rs at {}; run the earlier atomics patches first — update \
+                     firmware/build.rs::patch_rmk_split_adv_set_token",
+                    path.display()
+                );
+            }
+            contents = contents.replace(anchor, injected);
+            contents.push('\n');
+            contents.push_str(MARKER);
+            contents.push('\n');
+            fs::write(&path, contents).unwrap_or_else(|e| {
+                panic!("kobu: failed to write {}: {e}", path.display());
+            });
+        }
+    }
+
+    // 2/3: peripheral advertisement payload.
+    {
+        let Some(path) = find_rmk_file(RMK_VERSION, "src/split/ble/peripheral.rs") else {
+            println!(
+                "cargo:warning=kobu: could not find rmk-{RMK_VERSION} split/ble/peripheral.rs; \
+                 split adv set-token patch (peripheral) was not applied"
+            );
+            return;
+        };
+        println!("cargo:rerun-if-changed={}", path.display());
+        let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!("kobu: failed to read {}: {e}", path.display());
+        });
+        if !contents.contains(MARKER) {
+            let from_decl = "            info!(\"No central address provided, so we advertise as undirected\");\n            // No central address provided, so we advertise as undirected\n            AdStructure::encode_slice(";
+            let to_decl = "            info!(\"No central address provided, so we advertise as undirected\");\n            // kobu: undirected advertisements may carry a per-set token byte after\n            // the id (see build.rs::patch_rmk_split_adv_set_token). Declared out\n            // here so the payload borrow outlives the encode_slice argument list.\n            let kobu_token = crate::input_device::battery::KOBU_SPLIT_SET_TOKEN\n                .load(core::sync::atomic::Ordering::Relaxed);\n            let kobu_adv_payload = [id as u8, kobu_token];\n            // No central address provided, so we advertise as undirected\n            AdStructure::encode_slice(";
+            let from_payload = "                    AdStructure::ManufacturerSpecificData {\n                        company_identifier: 0xe118,\n                        payload: &[id as u8],\n                    },";
+            let to_payload = "                    AdStructure::ManufacturerSpecificData {\n                        company_identifier: 0xe118,\n                        // kobu: [id, token] when a set token is configured, else the\n                        // stock [id] (bit-identical wire format at token 0).\n                        payload: if kobu_token != 0 {\n                            &kobu_adv_payload[..2]\n                        } else {\n                            &kobu_adv_payload[..1]\n                        },\n                    },";
+            if !contents.contains(from_decl) || !contents.contains(from_payload) {
+                panic!(
+                    "kobu: expected the undirected-advertise block in rmk-{RMK_VERSION} \
+                     split/ble/peripheral.rs at {}; upstream may have changed — update \
+                     firmware/build.rs::patch_rmk_split_adv_set_token",
+                    path.display()
+                );
+            }
+            contents = contents.replace(from_decl, to_decl);
+            contents = contents.replace(from_payload, to_payload);
+            contents.push('\n');
+            contents.push_str(MARKER);
+            contents.push('\n');
+            fs::write(&path, contents).unwrap_or_else(|e| {
+                panic!("kobu: failed to write {}: {e}", path.display());
+            });
+        }
+    }
+
+    // 3/3: token-aware ScanHandler.
+    {
+        let Some(path) = find_rmk_file(RMK_VERSION, "src/split/ble/central.rs") else {
+            println!(
+                "cargo:warning=kobu: could not find rmk-{RMK_VERSION} split/ble/central.rs; \
+                 split adv set-token patch (central) was not applied"
+            );
+            return;
+        };
+        println!("cargo:rerun-if-changed={}", path.display());
+        let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!("kobu: failed to read {}: {e}", path.display());
+        });
+        if !contents.contains(MARKER) {
+            let from = "            // Check advertisement data\n            if report.data.len() < 25 {\n                continue;\n            }\n            if report.data[4] == 0x07\n                && report.data[5..].starts_with(&[\n                    // uuid: 4dd5fbaa-18e5-4b07-bf0a-353698659946\n                    70u8, 153u8, 101u8, 152u8, 54u8, 53u8, 10u8, 191u8, 7u8, 75u8, 229u8, 24u8, 170u8, 251u8, 213u8,\n                    77u8,\n                ])\n                && report.data[21..25] == [0x04, 0xff, 0x18, 0xe1]\n            {\n                // Uuid and manufacturer specific data check passed\n                let peripheral_id = report.data[25];";
+            let to = "            // Check advertisement data. kobu: `< 26` (stock had `< 25`) —\n            // the id read at data[25] needs 26 bytes; an exactly-25-byte\n            // matching report would have panicked.\n            if report.data.len() < 26 {\n                continue;\n            }\n            // kobu set-token matching (build.rs::patch_rmk_split_adv_set_token):\n            // token 0 = stock layout (manufacturer AD length 0x04, payload [id]);\n            // nonzero = token'd layout (length 0x05, payload [id, token]) and the\n            // token byte must match. The length byte makes the formats mutually\n            // invisible, so stock and token'd keyboards can never cross-pair.\n            let kobu_token = crate::input_device::battery::KOBU_SPLIT_SET_TOKEN\n                .load(core::sync::atomic::Ordering::Relaxed);\n            if kobu_token != 0 && report.data.len() < 27 {\n                continue;\n            }\n            let kobu_manuf_hdr: [u8; 4] = if kobu_token != 0 {\n                [0x05, 0xff, 0x18, 0xe1]\n            } else {\n                [0x04, 0xff, 0x18, 0xe1]\n            };\n            if report.data[4] == 0x07\n                && report.data[5..].starts_with(&[\n                    // uuid: 4dd5fbaa-18e5-4b07-bf0a-353698659946\n                    70u8, 153u8, 101u8, 152u8, 54u8, 53u8, 10u8, 191u8, 7u8, 75u8, 229u8, 24u8, 170u8, 251u8, 213u8,\n                    77u8,\n                ])\n                && report.data[21..25] == kobu_manuf_hdr\n                && (kobu_token == 0 || report.data[26] == kobu_token)\n            {\n                // Uuid and manufacturer specific data check passed\n                let peripheral_id = report.data[25];";
+            if !contents.contains(from) {
+                panic!(
+                    "kobu: expected the stock ScanHandler match block in rmk-{RMK_VERSION} \
+                     split/ble/central.rs at {}; upstream may have changed — update \
+                     firmware/build.rs::patch_rmk_split_adv_set_token",
+                    path.display()
+                );
+            }
+            contents = contents.replace(from, to);
+            contents.push('\n');
+            contents.push_str(MARKER);
+            contents.push('\n');
+            fs::write(&path, contents).unwrap_or_else(|e| {
+                panic!("kobu: failed to write {}: {e}", path.display());
+            });
+        }
+    }
 }
