@@ -26,14 +26,17 @@ mod keyboard_central {
     // as static `[[output]]` pins in keyboard.toml so `p.P0_26`,
     // `p.P0_30`, and `p.P0_06` are still owned by the peripherals struct
     // at this point. Uses `#[controller(poll)]` so the controller's
-    // `update()` tick can deterministically expire the purple
-    // peripheral-activity hold window.
+    // `update()` tick can deterministically expire the boot-battery /
+    // connect-flash windows and poll the host-connect edge.
     #[controller(poll)]
     fn status_led() {
         use ::embassy_nrf::gpio::{Level, Output, OutputDrive};
-        let red = Output::new(p.P0_26, Level::High, OutputDrive::Standard);
-        let green = Output::new(p.P0_30, Level::High, OutputDrive::Standard);
-        let blue = Output::new(p.P0_06, Level::High, OutputDrive::Standard);
+        // HighDrive (2026-08-13): green/blue have ~1 V higher forward voltage
+        // than red; at Standard drive their sink current can be too small to
+        // light visibly ("red works, green/blue dark" field report).
+        let red = Output::new(p.P0_26, Level::High, OutputDrive::HighDrive);
+        let green = Output::new(p.P0_30, Level::High, OutputDrive::HighDrive);
+        let blue = Output::new(p.P0_06, Level::High, OutputDrive::HighDrive);
         StatusLedController::new(red, green, blue)
     }
 

@@ -71,6 +71,20 @@ json = "0.12"
 const-gen = "1.6"
 
 [features]
+# Red-only status-LED vocabulary for a board whose green/blue LED channels
+# are physically dead (the original left-half XIAO, serial 1C5D35555D960632,
+# verified 2026-08-13: HighDrive self-test lit only red; an identical spare
+# XIAO lit all three with the same UF2). NOT in `default` — the left XIAO is
+# being replaced with a healthy one. Re-add `default = ["led-red-only"]` only
+# if a dead-LED board ever needs the fallback again: solid red = right half
+# missing, short red blip every 4 s = linked heartbeat, fast blink in the
+# boot window = low battery, dark otherwise.
+led-red-only = []
+# Boot LED self-test (red→green→blue 300 ms each before the battery color):
+# forces all three LED channels at max drive to diagnose dead channels — how
+# the original left XIAO's dead green/blue were confirmed. Diagnostic only;
+# normal builds omit it so boot starts straight at the battery color.
+led-selftest = []
 # Temporary on-device diagnostic for the pointer-のろのろ investigation: makes
 # the central status LED show the live macOS host BLE connection interval as a
 # color band (green ≤9ms / blue ~11ms / purple ~15ms / red ≥20ms) and flash

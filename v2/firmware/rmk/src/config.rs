@@ -184,6 +184,11 @@ pub fn status_led_purple_hold() -> Duration {
     Duration::from_millis(KOBU_STATUS_LED_PURPLE_HOLD_MS.load(ORD) as u64)
 }
 
+// Read by the central status LED's boot battery window (src/status_led.rs)
+// and writable live from kobu-config (Via Custom Channel 0xC0 ids 0x06/0x07).
+// The RIGHT half's boot color uses the same atomics directly at their
+// defaults (src/peripheral_led.rs — the Vial write handler lives on the
+// central only).
 pub fn status_led_battery_high_threshold() -> u8 {
     KOBU_STATUS_LED_BAT_HIGH.load(ORD)
 }

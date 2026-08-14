@@ -1,32 +1,40 @@
-//! Onboard RGB LED status controller for the LEFT / central half.
+//! Onboard RGB LED status controller for the central half (and the dongle,
+//! which shares this file).
 //!
-//! Power-conscious behavior (the LED used to be lit continuously, which is a
-//! real drain on the small LiPo):
+//! Always-on staging (2026-08-13, per the user request 「起動したときに
+//! バッテリー残量、繋がったら青、繋がらなかったら赤で光り続ける、レイヤーon
+//! の時は各レイヤーの色」— replacing the 08-11 power-saving design whose
+//! dark-when-happy steady state read as "the LED died"):
 //!
-//! 1. **Boot battery indication** — for [`BOOT_BATTERY_WINDOW`] after power-on
-//!    the LED shows the battery-level color (green / yellow / red), so the user
-//!    sees the charge state at a glance. After the window it goes dark.
+//! 1. **Boot battery window** — for [`BOOT_BATTERY_WINDOW`] after power-on the
+//!    LED shows the battery-level color (green / yellow / red, thresholds live
+//!    in `crate::config`). `NrfAdc::read_event` samples the SAADC immediately
+//!    on its first call and the kobu-patched `BatteryProcessor` publishes on
+//!    every sample, so the color is available within ~1 s of boot.
 //!
-//! 2. **Layer indicator** — whenever a NON-base layer is active the LED lights
-//!    in that layer's color (see [`layer_color`]); back on the base layer it is
-//!    off. RMK emits [`ControllerEvent::Layer`] on every layer change
-//!    (`activate_layer`/`deactivate_layer`/`toggle_layer` → `update_tri_layer`),
-//!    including the auto-mouse layer 4, momentary `LT` layers and `TG` toggles,
-//!    so this covers them all. The auto-mouse layer (4) is purple, matching the
-//!    old peripheral-activity flash.
+//! 2. **PC-connect flash** — 1 s of blue on the not-connected → connected
+//!    edge of the HOST link (BLE encrypted, or a USB cable appearing after
+//!    boot); seeded with VBUS at construction so booting on USB does not
+//!    flash. The split (right-half) link gets NO indication, connected or
+//!    not — the 08-13 solid-red alarm and solid-blue link colors were
+//!    removed by the 2026-08-14 user spec (no continuous glow).
 //!
-//! 3. Otherwise (base layer, past the boot window) the LED is **off** — common
-//!    case during normal typing, so the LED draws no current at rest.
+//! 3. **Layer indicator** — whenever a NON-base layer is active the LED
+//!    lights in that layer's color (see [`layer_color`]), including the
+//!    auto-mouse layer 4 (purple). This is the only sustained light, and
+//!    only while the layer is held/toggled.
+//!
+//! 4. Otherwise: **dark**.
+//!
+//! Typical boot reads as: battery color (~1 s) → dark → blue blink when the
+//! Mac link comes up → dark. Layer holds paint their color.
 //!
 //! The R/G/B GPIOs (P0.26 / P0.30 / P0.06) are common-anode: pin LOW = on.
 //!
-//! Implemented as a [`PollingController`] so the boot-window expiry is applied
-//! within one [`INTERVAL`] tick even when no event arrives. The VBUS flag is
-//! also re-sampled each tick so a USB plug/unplug is reflected during the boot
-//! battery window.
+//! Implemented as a [`PollingController`] so the boot-window expiry is
+//! applied within one [`INTERVAL`] tick even when no event arrives.
 
 use embassy_nrf::gpio::Output;
-use embassy_nrf::pac;
 use embassy_time::{Duration, Instant};
 use rmk::channel::{CONTROLLER_CHANNEL, ControllerSub};
 use rmk::controller::{Controller, PollingController};
@@ -34,15 +42,10 @@ use rmk::event::ControllerEvent;
 
 use crate::config;
 
-/// How long after boot the battery color is shown before the LED goes dark.
-const BOOT_BATTERY_WINDOW: Duration = Duration::from_secs(5);
-
-/// Read the nRF52840 POWER peripheral's VBUS-present flag. `true` means a
-/// USB cable is plugged in and supplying power, regardless of which output
-/// (USB vs BLE) the keyboard is currently routing key events through.
-fn vbus_present() -> bool {
-    pac::POWER.usbregstatus().read().vbusdetect()
-}
+/// How long the boot battery color is shown (re-armed to the first battery
+/// sample's arrival so it is always fully visible). 1 s per the 2026-08-14
+/// user spec — a quick glance, not a lingering display.
+const BOOT_BATTERY_WINDOW: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Color {
@@ -81,7 +84,7 @@ enum BatteryColor {
 }
 
 impl BatteryColor {
-    /// Battery thresholds are read live from `crate::config` so a future Vial
+    /// Battery thresholds are read live from `crate::config` so a Vial
     /// `CustomSetValue` write retunes them without a reboot. Defaults (60 / 20)
     /// match the previous hardcoded constants.
     fn from_percent(p: u8) -> Self {
@@ -109,7 +112,10 @@ impl BatteryColor {
 /// Internal event type the controller processes (decoupled from the wider
 /// `ControllerEvent` enum so `process_event` only sees what it can act on).
 pub enum LedEvent {
+    /// Central-side battery percentage (boot battery color).
     Battery(u8),
+    /// Split link to the RIGHT half established (`true`) / down (`false`).
+    SplitConnected(bool),
     Layer(u8),
 }
 
@@ -118,12 +124,35 @@ pub struct StatusLedController<'d> {
     green: Output<'d>,
     blue: Output<'d>,
     sub: ControllerSub,
+    /// Last central battery color (boot window display). `Unknown` until the
+    /// first `ControllerEvent::Battery` arrives (~1 s after boot).
     battery: BatteryColor,
+    /// True once the boot window has been re-armed to the FIRST battery
+    /// sample's arrival, so the battery color is always fully visible no
+    /// matter how late the ADC pipeline delivers.
+    battery_window_pinned: bool,
+    /// True iff the RIGHT half (split peripheral) is currently connected.
+    /// Defaults to false: at power-on nothing is connected yet, so past the
+    /// boot battery window the LED rests red without waiting for rmk's first
+    /// `SplitPeripheral(false)` announcement.
+    split_connected: bool,
     /// Highest currently-active layer (0 = base). Updated from
     /// `ControllerEvent::Layer`.
     layer: u8,
     /// Instant after which the boot battery indication stops.
     boot_until: Instant,
+    /// Host-connect edge detector state: last observed value of
+    /// `host_connected() || vbus_present()`. Seeded with the VBUS state at
+    /// construction so a USB cable already present at power-on does not
+    /// count as a fresh "PC connected" event.
+    host_seen: bool,
+    /// Instant after which the 1 s blue "PC connected" flash goes dark.
+    blue_until: Instant,
+    /// First `target_color` evaluation — the LED self-test runs relative to
+    /// this, NOT to absolute uptime: the polling loop only starts after the
+    /// whole entry init (embassy + SDC + storage), which can exceed the
+    /// test's window and silently skip it.
+    selftest_start: Option<Instant>,
     current: Color,
     /// Diagnostic (led-conn-diag) split-sample-arrival-rate window state:
     /// arrivals accumulated in the current window, the last computed per-second
@@ -146,10 +175,14 @@ impl<'d> StatusLedController<'d> {
             blue,
             sub: CONTROLLER_CHANNEL.subscriber().unwrap(),
             battery: BatteryColor::Unknown,
+            battery_window_pinned: false,
+            split_connected: false,
             layer: 0,
-            // Boot window starts now (construction happens once, in the entry
-            // scope after embassy init, so the time driver is live).
             boot_until: Instant::now() + BOOT_BATTERY_WINDOW,
+            host_seen: config::vbus_present(),
+            // In the past: no flash pending at boot.
+            blue_until: Instant::now(),
+            selftest_start: None,
             current: Color::Off,
             samples_accum: 0,
             last_rate: 0,
@@ -157,27 +190,89 @@ impl<'d> StatusLedController<'d> {
         }
     }
 
-    fn target_color(&self) -> Color {
-        // A non-base layer being active always wins — that's the layer
-        // indicator, and the user wants to see it whenever they're on a layer.
-        if self.layer != 0 {
-            return layer_color(self.layer);
+    fn target_color(&mut self) -> Color {
+        // Boot LED self-test — DIAGNOSTIC, off by default (build with
+        // `--features led-selftest`): red → green → blue, 300 ms each, forced
+        // at max drive before any status display. This is how the original
+        // left XIAO's dead green/blue channels were confirmed (2026-08-13)
+        // and how the replacement was verified. Runs relative to the FIRST
+        // evaluation, not absolute uptime — the polling loop starts only
+        // after entry init, which can outlast an uptime-anchored window.
+        if cfg!(feature = "led-selftest") {
+            let start = *self.selftest_start.get_or_insert_with(Instant::now);
+            let since = Instant::now().saturating_duration_since(start);
+            if since < Duration::from_millis(300) {
+                return Color::Red;
+            }
+            if since < Duration::from_millis(600) {
+                return Color::Green;
+            }
+            if since < Duration::from_millis(900) {
+                return Color::Blue;
+            }
         }
-        // Base layer: show battery only during the boot window, else go dark to
-        // save power.
+        // Host-connect edge: poll here (this runs every 50 ms tick) and start
+        // the 1 s blue flash on the not-connected → connected transition.
+        // "PC connected" = BLE link encrypted OR a USB cable appearing.
+        let host_now = config::host_connected() || config::vbus_present();
+        if host_now && !self.host_seen {
+            self.blue_until = Instant::now() + Duration::from_millis(1000);
+        }
+        self.host_seen = host_now;
+        // The 1 s "PC connected" flash is the freshest news — it interrupts
+        // whatever else is showing (2026-08-14 user spec: 「接続したら1sほど
+        // 青く光らせる」; no steady blue, no flash for the split link).
+        if Instant::now() < self.blue_until {
+            return Color::Blue;
+        }
+        // Red-only vocabulary for a board whose green/blue LED channels are
+        // physically dead (see the `led-red-only` feature note in Cargo.toml):
+        //   * boot window: fast blink = low battery, else dark
+        //   * right half missing: solid red
+        //   * linked: a short red blip every 4 s (alive + connected)
+        //   * layers: not representable without color — dark
+        if cfg!(feature = "led-red-only") {
+            let now_ms = Instant::now().as_millis();
+            if Instant::now() < self.boot_until {
+                let low = matches!(self.battery, BatteryColor::Red);
+                if low && now_ms % 300 < 150 {
+                    return Color::Red;
+                }
+                return Color::Off;
+            }
+            if !self.split_connected {
+                return Color::Red;
+            }
+            if now_ms % 4000 < 100 {
+                return Color::Red;
+            }
+            return Color::Off;
+        }
+        // Boot battery window: show the charge state first (per the user's
+        // boot narrative). `Unknown` renders off; the first sample lands
+        // within ~1 s.
         if Instant::now() < self.boot_until {
             let base = self.battery.as_color();
             // While USB is plugged in (VBUS high), suppress the "low battery"
             // red — there may be no battery (or it reads 0%) but the cable is
             // powering it, so red is a false alarm. Show green instead.
-            if vbus_present() && base == Color::Red {
-                Color::Green
-            } else {
-                base
+            if config::vbus_present() && base == Color::Red {
+                return Color::Green;
             }
-        } else {
-            Color::Off
+            return base;
         }
+        // NOTE: no disconnected-red and no steady link color — removed by the
+        // 2026-08-14 user spec (「未接続の場合赤に光らせる必要もありません」).
+        // `split_connected` stays tracked for the led-red-only fallback.
+        // Layer indicator: lights in the layer's color while a NON-base layer
+        // is active (including auto-mouse purple).
+        if self.layer != 0 {
+            return layer_color(self.layer);
+        }
+        // Steady state: dark (2026-08-14 user spec — no continuous glow; the
+        // PC link announces itself with the 1 s flash above, the right half
+        // needs no announcement at all).
+        Color::Off
     }
 
     /// Diagnostic LED (feature `led-conn-diag`): show the live macOS host BLE
@@ -280,9 +375,9 @@ impl<'d> StatusLedController<'d> {
     }
 
     fn apply(&mut self, color: Color) {
-        if self.current == color {
-            return;
-        }
+        // No "already showing this color" early-return: pins are re-asserted
+        // on every call (≤ every 50 ms tick, 3 GPIO writes — free), so
+        // `current` can never silently diverge from the physical pins.
         // (r, g, b) — true means LED on. Common-anode: LOW = on, HIGH = off.
         let (r, g, b) = match color {
             Color::Off => (false, false, false),
@@ -320,6 +415,24 @@ impl<'d> Controller for StatusLedController<'d> {
         match event {
             LedEvent::Battery(percent) => {
                 self.battery = BatteryColor::from_percent(percent);
+                // Re-arm the boot window from the FIRST sample's arrival:
+                // the 5 s used to run from construction, so a slow ADC
+                // pipeline (or a user looking up a beat late) could see the
+                // window half-spent dark. Now the full battery color always
+                // shows once, whenever the first sample lands.
+                if !self.battery_window_pinned {
+                    self.battery_window_pinned = true;
+                    self.boot_until = Instant::now() + BOOT_BATTERY_WINDOW;
+                }
+            }
+            LedEvent::SplitConnected(true) => {
+                self.split_connected = true;
+            }
+            LedEvent::SplitConnected(false) => {
+                // Published at the top of every connect attempt (~every 5.5 s
+                // while the right half is away) and after a disconnect — every
+                // `false` means "not connected right now", which we render red.
+                self.split_connected = false;
             }
             LedEvent::Layer(layer) => {
                 self.layer = layer;
@@ -340,14 +453,18 @@ impl<'d> Controller for StatusLedController<'d> {
     }
 
     /// Wait for a relevant `ControllerEvent` on `CONTROLLER_CHANNEL`. We act on
-    /// `Battery` (boot indication) and `Layer` (layer indicator); everything
-    /// else is filtered out so `process_event` isn't woken for nothing. VBUS is
-    /// sampled directly in [`target_color`] / [`update`], not delivered as an
-    /// event — embassy-nrf's `HardwareVbusDetect` owns the POWER interrupt.
+    /// `Battery` (boot battery color), `SplitPeripheral` (split-link indicator;
+    /// kobu has exactly one peripheral so the id is ignored) and `Layer` (layer
+    /// indicator); everything else is filtered out so `process_event` isn't
+    /// woken for nothing. The host link has no controller event — it is polled
+    /// in [`Self::refresh_host_edge`] from `update()`.
     async fn next_message(&mut self) -> LedEvent {
         loop {
             match self.sub.next_message_pure().await {
                 ControllerEvent::Battery(percent) => return LedEvent::Battery(percent),
+                ControllerEvent::SplitPeripheral(_id, connected) => {
+                    return LedEvent::SplitConnected(connected);
+                }
                 ControllerEvent::Layer(layer) => return LedEvent::Layer(layer),
                 _ => continue,
             }
@@ -356,8 +473,8 @@ impl<'d> Controller for StatusLedController<'d> {
 }
 
 impl<'d> PollingController for StatusLedController<'d> {
-    /// Poll often enough that the boot-window expiry and VBUS changes feel
-    /// snappy; 50 ms is well under the human "LED stuck" threshold.
+    /// Poll often enough that the window expiries and the host-connect edge
+    /// feel snappy; 50 ms is well under the human "LED stuck" threshold.
     const INTERVAL: Duration = Duration::from_millis(50);
 
     async fn update(&mut self) {
