@@ -1,0 +1,287 @@
+# kobu v2 DONGLE topology (Prospector display dongle, 2026-08).
+#
+# Three devices instead of two:
+#
+#   * DONGLE  = split central, USB-connected to the host, Prospector display
+#               (Waveshare 1.69" 240x280 ST7789V2 on SPIM3), NO keys, NO
+#               trackball. rows=0/cols=0 + empty pin arrays make the macro's
+#               matrix park forever (requires the async_matrix feature, which
+#               Cargo.toml enables — WITHOUT it the 0x0 matrix busy-spins).
+#   * RIGHT   = [[split.peripheral]] #0 (id 0), unchanged wiring: pointer ball.
+#   * LEFT    = [[split.peripheral]] #1 (id 1), the half that used to be the
+#               central: scroll ball. Its Joystick events are relabeled X→H/Y→V
+#               and its Battery events tagged 0x4000 by the registry patch
+#               `patch_rmk_peripheral_manager_source_disambiguation`
+#               (../rmk/build.rs) — id 0 passes through untouched, so the
+#               classic topology binaries are unaffected by the shared patch.
+#
+# ⚠️ id 0 MUST stay the right half: the registry patch keys its left-half
+# treatment on `id != 0` precisely so the classic left-central topology
+# (whose only peripheral is id 0 = right) keeps byte-identical behavior.
+#
+# ⚠️ [layout] / keymap / [behavior.*] / [ble] / [chip] / [host] / [storage]
+# are a VERBATIM COPY of ../rmk/keyboard.toml (the classic topology file) —
+# keep them in sync when editing either file. Hardware pin documentation
+# (FFC mapping, diode direction, battery divider rationale) lives in that
+# file's comments and is not duplicated here.
+#
+# Build (from v2/firmware/dongle/):
+#   cargo build --release --bin dongle   # Prospector XIAO
+#   cargo build --release --bin left     # left half  (id 1)
+#   cargo build --release --bin right    # right half (id 0)
+# First build on a fresh registry needs the same throwaway-build →
+# `cargo clean --release -p rmk -p trouble-host -p rmk-macro` → rebuild ritual
+# as the classic crate (see ../../README.md).
+
+[keyboard]
+name = "kobu2"
+product_name = "kobu2"
+vendor_id = 0x4b4f
+product_id = 0x425A
+manufacturer = "s-katada"
+# Seeed XIAO nRF52840 BLE — enables the nrf52840 chip defaults in RMK.
+board = "XIAO BLE"
+usb_enable = true
+
+[layout]
+rows = 4
+cols = 10
+layers = 7
+keymap = [
+    # Layer 0 — Mac / default
+    [
+        ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+        ["A", "S", "D", "F", "G", "H", "J", "K", "L", "MT(Semicolon, LGui|LShift, FH)"],
+        ["Z", "X", "C", "V", "B", "N", "M", "Comma", "Dot", "MT(Slash, LGui|LCtrl, FH)"],
+        ["LShift", "LGui", "LCtrl", "MT(Language2, LShift, FH)", "Backspace", "Backspace", "MT(Escape, LAlt, FH)", "LT(2, Space, LTP)", "LT(3, Enter, LTP)", "RShift"],
+    ],
+    # Layer 1 — Win/Linux overlay
+    [
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "MT(Semicolon, LCtrl|LShift, FH)"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "MT(Slash, LCtrl|LAlt, FH)"],
+        ["_", "_", "MT(Backspace, LAlt, FH)", "LT(5, LGui, LTP)", "_", "MT(Escape, LGui, FH)", "_", "_", "_", "_"],
+    ],
+    # Layer 2 — numbers / symbols
+    [
+        ["Kc1", "Kc2", "Kc3", "Kc4", "Kc5", "Kc6", "Kc7", "Kc8", "Kc9", "Kc0"],
+        ["WM(Kc1, LShift)", "WM(Kc2, LShift)", "WM(Kc3, LShift)", "WM(Kc4, LShift)", "WM(Kc5, LShift)", "Left", "Down", "Up", "Right", "Semicolon"],
+        ["WM(Kc6, LShift)", "WM(Kc7, LShift)", "WM(Kc8, LShift)", "WM(Kc9, LShift)", "WM(Kc0, LShift)", "No", "No", "No", "No", "_"],
+        ["_", "_", "_", "MT(Language1, LShift, FH)", "_", "_", "_", "_", "_", "_"],
+    ],
+    # Layer 3 — settings, media, BLE
+    [
+        ["User0", "User1", "User2", "User3", "No", "MediaPrevTrack", "MediaPlayPause", "MediaNextTrack", "AudioVolDown", "AudioVolUp"],
+        ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"],
+        ["TO(0)", "TG(1)", "No", "No", "User6", "F11", "F12", "F13", "No", "_"],
+        ["_", "_", "_", "_", "_", "Delete", "_", "_", "_", "_"],
+    ],
+    # Layer 4 — mouse (auto-mouse layer; left hand transparent, right keeps buttons)
+    [
+        ["_", "_", "_", "_", "_", "MouseBtn1", "MouseBtn2", "MouseBtn2", "MouseBtn3", "_"],
+        ["_", "_", "_", "_", "_", "No", "No", "No", "No", "_"],
+        ["_", "_", "_", "_", "_", "No", "No", "No", "No", "_"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+    ],
+    # Layer 5 — Emacs
+    [
+        ["WM(Q, LCtrl)", "WM(W, LCtrl)", "End", "WM(R, LCtrl)", "WM(T, LCtrl)", "WM(Y, LCtrl)", "WM(U, LCtrl)", "WM(I, LCtrl)", "WM(O, LCtrl)", "Up"],
+        ["TD(1)", "WM(S, LCtrl)", "Delete", "Right", "WM(G, LCtrl)", "Backspace", "WM(J, LCtrl)", "TD(0)", "WM(L, LCtrl)", "WM(Semicolon, LCtrl)"],
+        ["WM(Z, LCtrl)", "WM(X, LCtrl)", "WM(C, LCtrl)", "WM(V, LCtrl)", "Left", "Down", "WM(M, LCtrl)", "WM(Comma, LCtrl)", "WM(Dot, LCtrl)", "WM(Quote, LCtrl)"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+    ],
+    # Layer 6 — Neovim
+    [
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+        ["_", "_", "_", "LCtrl", "_", "_", "_", "_", "_", "_"],
+    ],
+]
+
+[behavior.combo]
+timeout = "50ms"
+combos = [
+    { actions = ["Q", "W"], output = "Grave" },
+    { actions = ["A", "S"], output = "Tab" },
+    { actions = ["Y", "U"], output = "Backspace" },
+    { actions = ["U", "I"], output = "WM(Backslash, LShift)" },
+    { actions = ["I", "O"], output = "Minus" },
+    { actions = ["O", "P"], output = "Equal" },
+    { actions = ["J", "K"], output = "LeftBracket" },
+    { actions = ["K", "L"], output = "RightBracket" },
+    { actions = ["L", "MT(Semicolon, LGui|LShift, FH)"], output = "Quote" },
+    { actions = ["L", "MT(Semicolon, LCtrl|LShift, FH)"], output = "Quote" },
+    { actions = ["N", "M"], output = "Backspace" },
+    { actions = ["Comma", "Dot"], output = "Slash" },
+    { actions = ["D", "F"], output = "WM(No, LGui|LAlt)", layer = 0 },
+    { actions = ["D", "F"], output = "WM(No, LCtrl|LAlt)", layer = 1 },
+    { actions = ["S", "D"], output = "TG(6)", layer = 1 },
+    { actions = ["S", "D"], output = "TG(6)", layer = 6 },
+]
+
+[behavior.fork]
+forks = []
+
+[behavior.morse]
+enable_flow_tap = false
+prior_idle_time = "150ms"
+hold_on_other_press = true
+hold_timeout = "200ms"
+gap_timeout = "200ms"
+morses = [
+    { tap = "WM(K, LCtrl)", double_tap = "Macro(0)" },
+    { tap = "Home", double_tap = "WM(A, LCtrl)" },
+    { tap = "WM(LeftBracket, LGui)", hold = "LShift", profile = "FH" },
+]
+
+[behavior.morse.profiles]
+FH = { hold_on_other_press = true, hold_timeout = "250ms", gap_timeout = "200ms" }
+LTP = { permissive_hold = true, hold_timeout = "200ms", gap_timeout = "200ms" }
+
+[[behavior.macro.macros]]
+operations = [
+    { operation = "down", keycode = "LShift" },
+    { operation = "tap", keycode = "End" },
+    { operation = "up", keycode = "LShift" },
+    { operation = "delay", duration = "30ms" },
+    { operation = "tap", keycode = "Delete" },
+]
+
+[ble]
+enabled = true
+default_tx_power = 8
+# battery_adc_pin drives BOTH the halves' adc_device (they sample their LiPo
+# and forward the raw value over the split link) AND the dongle central's
+# battery_processor binding (which decodes forwarded values). The dongle's own
+# macro-generated adc_device is discarded in src/dongle.rs's entry override —
+# the dongle is USB-powered and P0_31 floats there.
+battery_adc_pin = "P0_31"
+adc_divider_measured = 510
+adc_divider_total = 1510
+
+[chip.nrf52840]
+dcdc_reg0 = false
+dcdc_reg1 = true
+
+[split]
+connection = "ble"
+
+# DONGLE = central with no keys. rows=0/cols=0 with EMPTY-BUT-PRESENT pin
+# arrays is the maintainer-blessed dongle pattern on rmk 0.8.2 (issue #568):
+# the macro emits Matrix::<_,_,_,0,0,_> whose read_event awaits an empty
+# select_slice = parks forever under async_matrix. Omitting [split.central.matrix]
+# or its pin arrays instead panics the proc macro.
+[split.central]
+rows = 0
+cols = 0
+row_offset = 0
+col_offset = 0
+
+[split.central.matrix]
+matrix_type = "normal"
+row_pins = []
+col_pins = []
+row2col = true
+
+# ── Peripheral 0 = RIGHT half (id 0) ─ unchanged from the classic topology ──
+# Keys occupy cols 5..9 of the unified 4x10 layout; pointer trackball.
+[[split.peripheral]]
+rows = 4
+cols = 5
+row_offset = 0
+col_offset = 5
+
+[split.peripheral.matrix]
+matrix_type = "normal"
+row_pins = ["P0_29", "P0_04", "P0_05", "P1_11"]
+# Natural order: keymap col 5 = inner index = /COL0 = P1.12.
+col_pins = ["P1_12", "P1_13", "P1_14", "P1_15", "P0_10"]
+row2col = true
+
+# Battery-sense enable: P0_14 LOW gates the XIAO BAT divider onto P0_31.
+[[split.peripheral.output]]
+pin = "P0_14"
+low_active = false
+initial_state_active = false
+
+# RIGHT-board trackball (PMW3610) — the POINTER ball.
+[[split.peripheral.input_device.pmw3610]]
+name = "right"
+cpi = 600
+force_awake = true
+smart_mode = true
+
+[split.peripheral.input_device.pmw3610.spi]
+instance = ""
+sck = "P0_03"
+mosi = "P0_02"
+miso = ""
+cs = "P0_09"
+
+# ── Peripheral 1 = LEFT half (id 1) ─ the half that used to be the central ──
+# Keys occupy cols 0..4; scroll trackball (relabeled X→H/Y→V by the registry
+# patch at ingest on the dongle).
+[[split.peripheral]]
+rows = 4
+cols = 5
+row_offset = 0
+col_offset = 0
+
+[split.peripheral.matrix]
+matrix_type = "normal"
+row_pins = ["P0_29", "P0_04", "P0_05", "P1_11"]
+# Reversed order (left half): keymap col 0 = outer pinky = /COL4 = P0.10.
+col_pins = ["P0_10", "P1_15", "P1_14", "P1_13", "P1_12"]
+row2col = true
+
+[[split.peripheral.output]]
+pin = "P0_14"
+low_active = false
+initial_state_active = false
+
+# LEFT-board trackball (PMW3610) — the SCROLL ball.
+[[split.peripheral.input_device.pmw3610]]
+name = "left"
+cpi = 600
+force_awake = true
+smart_mode = true
+
+[split.peripheral.input_device.pmw3610.spi]
+instance = ""
+sck = "P0_03"
+mosi = "P0_02"
+miso = ""
+cs = "P0_09"
+
+[rmk]
+# 2 peripherals ⇒ CONNECTIONS_MAX = 3 (2 split links + 1 host link), SDC
+# central_count(2), and the +8 KiB SDC heap — all derived from this by the
+# macro/build pipeline.
+split_peripherals_num = 2
+ble_profiles_num = 4
+combo_max_num = 18
+morse_max_num = 6
+macro_space_size = 256
+fork_max_num = 8
+# Two trackball peripherals share the single-consumer EVENT_CHANNEL with the
+# battery/connection traffic; default 16 invited drop-oldest under load.
+event_channel_size = 32
+# Permanent publisher census with 2 peripherals sits at ~11 of the default 12
+# (2 per manager + keyboard + keymap + battery + ble + profile + …); 16 gives
+# the display/dongle code room.
+controller_channel_pubs = 16
+
+[host]
+vial_enabled = true
+# Physical unlock chord: both outer top pinkies (Q + P positions), forwarded
+# as offset-adjusted key events from the halves — works unchanged on the
+# dongle central.
+unlock_keys = [[0, 0], [0, 9]]
+
+[storage]
+enabled = true
+start_addr = 0xA0000
+num_sectors = 32
+clear_layout = false
+clear_storage = false

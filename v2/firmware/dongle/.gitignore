@@ -1,0 +1,6 @@
+target
+*.bin
+*.elf
+*.hex
+*.uf2
+keyboard.toml.bak

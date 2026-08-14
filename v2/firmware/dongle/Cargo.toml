@@ -1,0 +1,113 @@
+[package]
+name = "kobu-dongle"
+version = "0.1.0"
+authors = ["s-katada <shunya.saitama@gmail.com>"]
+description = "Prospector display dongle topology for the kobu2 split keyboard (dongle = central, both halves = BLE peripherals)"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+# Shares ../rmk/build.rs verbatim so the in-place registry patches can never
+# diverge between the classic topology and the dongle topology. The build
+# script's relative reads (vial.json / memory.x / keyboard.toml via
+# KEYBOARD_TOML_PATH in .cargo/config.toml) resolve against THIS package root,
+# so this crate carries its own copies of those three files.
+build = "../rmk/build.rs"
+
+[dependencies]
+rmk = { version = "0.8", features = [
+    "nrf52840_ble",
+    "split",
+    "async_matrix",
+    "adafruit_bl",
+] }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc", rev = "11d5c3c", features = [
+    "defmt",
+    "peripheral",
+    "central",
+    "nrf52840",
+] }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc", rev = "11d5c3c", features = [
+    "defmt",
+    "critical-section-impl",
+    "nrf52840",
+] }
+bt-hci = { version = "0.6", default-features = false, features = ["defmt"] }
+
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.5"
+embassy-time = { version = "0.5", features = ["tick-hz-32_768", "defmt", "defmt-timestamp-uptime"] }
+embassy-nrf = { version = "0.8", features = [
+    "defmt",
+    "nrf52840",
+    "time-driver-rtc1",
+    "gpiote",
+    "unstable-pac",
+    "nfc-pins-as-gpio",
+    "time",
+] }
+embassy-executor = { version = "0.9", features = [
+    "defmt",
+    "arch-cortex-m",
+    "executor-thread",
+] }
+embassy-sync = "0.7"
+defmt = "1.0"
+defmt-rtt = "1.0"
+panic-probe = { version = "1.0", features = ["print-defmt"] }
+static_cell = "2"
+
+rand = { version = "0.8.4", default-features = false }
+rand_core = { version = "0.6" }
+rand_chacha = { version = "0.3", default-features = false }
+
+# `../rmk/src/trackball.rs` (shared via #[path]) builds `MouseReport` values
+# directly. Must match the version rmk 0.8 pulls in to avoid duplicate types.
+usbd-hid = "0.9"
+
+embassy-usb-driver = "=0.2.0"
+
+# Prospector status screen (ST7789V2 240x280 over SPIM3). Pure-math no_std
+# drawing library; the panel driver itself is hand-rolled in src/display.rs.
+embedded-graphics = "0.8"
+
+[build-dependencies]
+xz2 = "0.1.7"
+json = "0.12"
+const-gen = "1.6"
+
+[features]
+# The shared sources (../rmk/src/{config,trackball,status_led}.rs) reference
+# these features via `cfg!`; declare them so the cfg names exist. No dongle
+# UF2 variant enables any: the dongle's own XIAO LED is healthy, so
+# led-red-only (the classic crate's default, for the left half's dead
+# green/blue channels) must stay OFF here.
+led-conn-diag = []
+led-ball-diag = []
+led-red-only = []
+led-selftest = []
+
+[[bin]]
+name = "dongle"
+path = "src/dongle.rs"
+
+[[bin]]
+name = "left"
+path = "src/left.rs"
+
+[[bin]]
+name = "right"
+path = "src/right.rs"
+
+[profile.dev]
+codegen-units = 1
+debug = true
+opt-level = 1
+overflow-checks = true
+lto = false
+panic = 'unwind'
+
+[profile.release]
+codegen-units = 1
+debug = true
+opt-level = "z"
+overflow-checks = false
+lto = "fat"
