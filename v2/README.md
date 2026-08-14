@@ -10,8 +10,9 @@
 |---|---|
 | [`case/`](case/) | ケースの STL |
 | [`pcb/`](pcb/) | KiCad プロジェクト (`left-main` / `right-main` / `thumb-left` / `thumb-right`) |
-| [`firmware/rmk/`](firmware/rmk/) | RMK ベースのファームウェア (Rust, thumbv7em-none-eabihf)。v1 の `firmware/rmk` からのフォーク |
-| [`keymap-editor/`](keymap-editor/) | kobu2 専用の Web キーマップエディタ（実機の盤面をクリックして編集 + トラックボール調整）|
+| [`firmware/rmk/`](firmware/rmk/) | RMK ベースのファームウェア (Rust, thumbv7em-none-eabihf)。v1 の `firmware/rmk` からのフォーク。**クラシック構成（左手=セントラル）** |
+| [`firmware/dongle/`](firmware/dongle/) | **Prospector ドングル構成**（ドングル=セントラル+ST7789 画面、左右両手=ペリフェラル）。keymap/behavior は `firmware/rmk/keyboard.toml` と要同期 |
+| [`keymap-editor/`](keymap-editor/) | kobu2 専用の Web キーマップエディタ（実機の盤面をクリックして編集 + トラックボール調整）。どちらの構成でも無改修で動く（VID/PID・Via 0xC0 セマンティクス共通）|
 
 ## v1 とのファームウェア差分
 
@@ -19,7 +20,8 @@
   - 実基板で確認済み: 4 基板とも J1 は `1..4=/ROW0../ROW3`, `5..9=/COL0../COL4`, `10=NC` の**同一ピン配置**で、追加キーは各メイン基板の `SW16 = /ROW3 × /COL4`（小指列の最下段、既存最下行の 16mm 下）。/ROW3 が FFC pin4 でメインユニットへ届いています。
   - ⚠️ FFC ケーブルは v1 と逆で**ストレート結線（pin N ↔ pin N）**が必要です。v2 の FFC には電源線が無く（pin10 = NC、メイン基板はスイッチとダイオードのみの完全パッシブ）、誤ったケーブルでも MCU ピンが電源に張り付くことはありませんが、マトリクスは全く読めません。導通チェック手順は `firmware/rmk/keyboard.toml` 冒頭コメント参照。
 - 識別子: name/product_name = **kobu2**、product_id = **0x425A**（VID `0x4b4f` と Vial keyboard UID は v1 と共通）。[web editor](../v1/web/rmk-editor/) は v1/v2 両方の PID を受け付けます。
-- それ以外（build.rs の 74 レジストリパッチ、`src/`、メモリレイアウト、依存クレートのバージョン）は v1 と同一です。
+- それ以外（build.rs の 84 レジストリパッチ、`src/`、メモリレイアウト、依存クレートのバージョン）は v1 と同一です。
+  - うち 3 つは [`firmware/dongle/`](firmware/dongle/) のための 2026-08 追加: `patch_rmk_peripheral_manager_source_disambiguation`（**id≠0 のときだけ発火** → ペリフェラルが id0 の右手のみのクラシック構成では実行時に不活性）、`patch_rmk_split_connect_timeout_widen`（split 接続タイムアウト 5s→12s。クラシック構成では SCANNING_MUTEX が無競合でタイムアウト自体ほぼ発火しないため実質不可視）、`patch_rmk_split_adv_set_token`（広告のセット識別トークン。デフォルト 0 = 素の rmk 挙動なのでクラシック構成は電波レベルで不変、複数セットの誤ペアリング防止はドングル構成のみ有効化）。
 
 ## ⚠️ build.rs は v1 と同一内容に保つ
 
