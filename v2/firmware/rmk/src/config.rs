@@ -29,8 +29,9 @@ use embassy_time::Duration;
 use rmk::input_device::battery::{
     KOBU_BALL_FF_REJECTS, KOBU_BALL_INIT_READY, KOBU_HOST_CONN_INTERVAL_US, KOBU_HOST_CONNECTED,
     KOBU_LAST_KEY_TICKS, KOBU_LAST_TYPING_TICKS, KOBU_MOUSE_BUTTONS, KOBU_PERIPHERAL_SAMPLES,
-    KOBU_SCROLL_INVERT_X, KOBU_SCROLL_INVERT_Y, KOBU_SCROLL_THROTTLE_MS, KOBU_STATUS_LED_BAT_HIGH,
-    KOBU_STATUS_LED_BAT_LOW, KOBU_STATUS_LED_PURPLE_HOLD_MS, KOBU_TRACKBALL_CPI,
+    KOBU_SCROLL_INVERT_X, KOBU_SCROLL_INVERT_Y, KOBU_SCROLL_STEP, KOBU_SCROLL_THROTTLE_MS,
+    KOBU_STATUS_LED_BAT_HIGH, KOBU_STATUS_LED_BAT_LOW, KOBU_STATUS_LED_PURPLE_HOLD_MS,
+    KOBU_TRACKBALL_CPI,
 };
 
 /// Ordering used for all reads / writes here. `Relaxed` is correct
@@ -64,6 +65,12 @@ pub struct KobuSettings {
     pub scroll_throttle_ms: u8,
     pub scroll_invert_x: bool,
     pub scroll_invert_y: bool,
+    /// Scroll sensitivity divisor: raw PMW3610 counts accumulated per emitted
+    /// wheel tick (lower = stronger 効き / more lines per roll, higher =
+    /// calmer). The Set handler clamps to 4..=120. The first tick of a fresh
+    /// gesture instead uses `min(scroll_step, SCROLL_FIRST_TICK_STEP)` — see
+    /// `trackball.rs` (効き pass).
+    pub scroll_step: u8,
     /// How long the status LED stays purple after a peripheral
     /// trackball event. `0` disables the purple hold (LED stays on
     /// the battery / VBUS colour).
@@ -81,6 +88,8 @@ impl Default for KobuSettings {
     ///
     ///   * 1× CPI multiplier (= PMW3610 native)
     ///   * no scroll throttling, no axis invert
+    ///   * 30-count scroll divisor (≈ 1.27 mm of ball travel per line at
+    ///     cpi 600)
     ///   * 200 ms purple hold
     ///   * battery thresholds 60% / 20%
     ///
@@ -93,6 +102,7 @@ impl Default for KobuSettings {
             scroll_throttle_ms: 0,
             scroll_invert_x: false,
             scroll_invert_y: false,
+            scroll_step: 30,
             status_led_purple_hold_ms: 200,
             status_led_battery_high_threshold: 60,
             status_led_battery_low_threshold: 20,
@@ -165,14 +175,21 @@ pub fn scroll_invert_x() -> bool {
     KOBU_SCROLL_INVERT_X.load(ORD)
 }
 
-// Retained for API symmetry and the kobu-config wire schema (Via Custom
-// Channel 0xC0 id 0x04 / web SPA still read & write KOBU_SCROLL_INVERT_Y).
-// The scroll path itself no longer uses the vertical axis — ScrollProcessor
-// drives the wheel from the horizontal roll only — so this helper currently
-// has no firmware-side reader.
-#[allow(dead_code)]
+// Flips the vertical-roll contribution to the wheel (Via Custom Channel 0xC0
+// id 0x04 / web SPA). Regained a real reader in the 効き pass: the
+// dominant-axis lock in ScrollProcessor feeds the wheel the V axis whenever
+// it owns the burst, so this toggle now genuinely reverses vertical
+// scrolling. It was a dead toggle while the axes were summed.
 pub fn scroll_invert_y() -> bool {
     KOBU_SCROLL_INVERT_Y.load(ORD)
+}
+
+/// Live scroll sensitivity divisor in raw counts per wheel tick (Via Custom
+/// Channel 0xC0 id 0x08, web-editor slider; default 30, clamped 4..=120 by
+/// the Set handler). Read by `trackball.rs::ScrollProcessor` on every banked
+/// sample. Guarded ≥ 1 here so a rogue write can never zero the divisor.
+pub fn scroll_step() -> i32 {
+    KOBU_SCROLL_STEP.load(ORD).max(1) as i32
 }
 
 // Retained for the kobu-config wire schema (Via Custom Channel 0xC0 id 0x05 /

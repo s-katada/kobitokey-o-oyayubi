@@ -416,50 +416,96 @@ pub async fn run_auto_mouse_layer<
 // emit stays NON-BLOCKING, so `process()` still returns promptly and
 // EVENT_CHANNEL keeps draining — the old drop-oldest "のっぺり" protection
 // is preserved; we only removed the extra async hop and the 4 ms tick.
-// Source rate is now matched to the link (PMW3610 poll 8 ms ≈ ZMK
-// REPORT_INTERVAL_MIN, see build.rs), so the channel rarely backs up.
+// Source rate is matched to the link rate (PMW3610 poll 8 ms ≈ ZMK
+// REPORT_INTERVAL_MIN — a 4 ms experiment was HW-worse and rolled back,
+// see build.rs::patch_rmk_pmw3610_slower_poll), so the channel rarely
+// backs up.
 
 /// Multiplier base for `config::trackball_cpi()`: 1000 = 1.0×.
 const CPI_DENOM: i32 = 1000;
 
-/// Scroll sensitivity divisor: raw PMW3610 counts (at 600 CPI) per emitted
-/// wheel tick. Higher = slower / less sensitive scrolling. One HID wheel unit
-/// = one scroll detent/line on the host (macOS then layers its own scroll
-/// acceleration on top), so this is "raw counts per scrolled line".
+// Scroll sensitivity divisor: raw PMW3610 counts (at 600 CPI) per emitted
+// wheel tick — "raw counts per scrolled line"; one HID wheel unit is one
+// detent/line on the host (macOS layers its own acceleration on top).
+//
+// 効き pass (2026-08-16): the divisor is LIVE-TUNABLE — the hot path reads
+// `config::scroll_step()` (Via Custom Channel 0xC0 id 0x08, web-editor
+// slider; the Set handler clamps 4..=120; lower = stronger 効き, higher =
+// calmer). Boot default is 30, defined at `KobuSettings::default` and the
+// `KOBU_SCROLL_STEP` initialiser injected by
+// `build.rs::patch_rmk_kobu_settings_atomics`. History of the 30: STEP=8
+// scrolled "どえらい行数" after round 7's 500 µs → 2 ms poll change packed
+// ~4× more counts into each sample, and the user wanted another ~3-4× calmer
+// on top, so 8 × ~3.75 ≈ 30; at keyboard.toml cpi=600 = 23.6 counts/mm that
+// is ~1.27 mm of ball travel per line. Not persisted: a reboot restores the
+// default. `ScrollProcessor` carries the remainder, so a slow roll
+// (per-sample |dx| < step) still accumulates to a tick instead of rounding
+// to zero.
+
+/// First-tick boost (効き pass): threshold in raw counts for the FIRST wheel
+/// tick after the accumulator was reset — burst start (idle decay), direction
+/// reversal (sign-flip reset), and boot. Every fresh gesture used to pay a
+/// full step (default 30 ≈ 1.27 mm of ball travel) of dead travel before
+/// anything moved on screen, which read as "効きが悪い" — the scroll seemed
+/// to ignore the first nudge. 12 counts ≈ 0.51 mm gets the first line out
+/// ~2.5× sooner while sustained speed is untouched (later ticks pay the full
+/// step). The boosted tick is capped at ±1 unit — the boost buys LATENCY,
+/// not amplitude. If the live step is tuned below this, the smaller of the
+/// two wins (`min`), so a very sensitive setup is never made coarser.
+const SCROLL_FIRST_TICK_STEP: i32 = 12;
+
+/// ── Dominant-axis lock (効き pass; re-applied from the 08-10 design) ──
 ///
-/// Was 8, which scrolled "どえらい行数" (a tiny roll jumped a huge number of
-/// lines). Two compounding causes:
-///   1. Round 7 slowed the PMW3610 poll 500 µs → 2 ms (2 kHz → 500 Hz). The
-///      sensor accumulates dx between polls, so each *sample* now carries ~4×
-///      more counts than when STEP=8 was tuned — i.e. STEP=8 produced ~4× more
-///      wheel units per physical roll after the poll change.
-///   2. On top of that the user wants it ~3–4× less sensitive than it already
-///      felt.
-/// 30 ≈ 8 × ~3.75: it both undoes the 4× poll regression and lands close to a
-/// 3.75× reduction versus the (already-too-fast) current feel. At the actual
-/// keyboard.toml cpi=600 = 23.6 counts/mm, 30 counts ≈ ~1.27 mm of ball
-/// travel per scrolled line, which
-/// reads as a calm, deliberate scroll. `ScrollProcessor` carries the remainder,
-/// so a slow roll (per-sample |dx| < STEP) still accumulates to a tick instead
-/// of rounding to zero. Tune 24–40 by feel; must be ≥ 1. (Could be wired to a
-/// Vial Custom-channel field later; a fixed default is enough for now.)
-const SCROLL_STEP: i32 = 30;
+/// The wheel used to be fed `h + (-v)` — BOTH roll axes folded by summation.
+/// The two contributions OPPOSE on the up+left / down+right diagonals (the
+/// old comment's "Known trade-off"), so any vertical roll with sideways
+/// drift — which is most human thumb rolls — lost part of its travel, and a
+/// true diagonal was fully dead. Per burst we now LOCK onto the dominant
+/// axis and feed the wheel that axis alone; the drift axis is discarded
+/// instead of SUBTRACTED. Pure-vertical and pure-horizontal rolls are
+/// bit-for-bit unchanged.
+///
+/// Mechanism (spec preserved in memory `project-kobu-scroll-axis-lock`):
+/// per-sample each axis's gross |counts| decays by 1/AXIS_GROSS_DECAY_DIV
+/// then accumulates; while Undecided, once gross_h + gross_v ≥
+/// AXIS_LOCK_THRESHOLD the larger side wins (tie → V, the common scroll
+/// intent); a locked burst can be stolen mid-flight when the other axis's
+/// gross clears the threshold AND exceeds AXIS_SWITCH_MARGIN× the holder's
+/// (a deliberate no-pause direction change follows within a few samples; a
+/// 45° wobble cannot flap the lock). Lock and grosses reset at the
+/// SCROLL_IDLE_DECAY burst boundary.
+///
+/// ⚠ AXIS_LOCK_THRESHOLD must stay ≤ 3 (see the memory note): a slow roll
+/// delivering 1 count/sample must still cross it promptly — the integer 1/4
+/// decay is a no-op below 4, and higher thresholds starve slow scroll.
+const AXIS_LOCK_THRESHOLD: i32 = 3;
+/// Steal margin: the non-locked axis takes over when its gross exceeds this
+/// multiple of the holder's. 2× is decisive enough that diagonal wobble
+/// never flaps, close enough that an intentional H↔V change follows in a
+/// few samples.
+const AXIS_SWITCH_MARGIN: i32 = 2;
+/// Per-sample gross decay divisor (`g -= g/4`): recent samples dominate the
+/// lock decision, so the lock tracks what the thumb is doing NOW, not the
+/// whole burst's history.
+const AXIS_GROSS_DECAY_DIV: i32 = 4;
 
 /// Hard ceiling on wheel units emitted in a single event. At 500 Hz a hard
 /// ball spin can pack ~90+ raw counts into one 2 ms sample; without this a
 /// single sample could dump several line-ticks at once, reintroducing the
-/// chunky "huge jump" feel even with a large SCROLL_STEP. Capping per-event
+/// chunky "huge jump" feel even with a large scroll step. Capping per-event
 /// units to a small number keeps fast spins smooth (many small reports) rather
 /// than lumpy. Must be ≥ 1.
 const SCROLL_MAX_UNITS: i32 = 3;
 
 /// Idle window after which a banked sub-step scroll residue is stale and is
-/// zeroed before banking the next sample. Without this, up to SCROLL_STEP-1 =
-/// 29 counts left over from a roll minutes ago gave the next unrelated touch a
-/// head start (or fought it, when opposite). 300 ms sits safely ABOVE a slow
-/// gentle roll's sparse 60-120 ms sample gaps (the ZMK slow-roll lesson:
-/// purging slow accumulation kills slow scroll), and far below any human
-/// "came back to scroll later" gap, so genuine slow rolls keep summing.
+/// zeroed before banking the next sample. Without this, up to step-1 counts
+/// (29 at the default step) left over from a roll minutes ago gave the next
+/// unrelated touch a head start (or fought it, when opposite). 300 ms sits
+/// safely ABOVE a slow gentle roll's sparse 60-120 ms sample gaps (the ZMK
+/// slow-roll lesson: purging slow accumulation kills slow scroll), and far
+/// below any human "came back to scroll later" gap, so genuine slow rolls
+/// keep summing. Also the burst boundary that releases the dominant-axis
+/// lock and re-arms the first-tick boost (効き pass).
 const SCROLL_IDLE_DECAY: Duration = Duration::from_millis(300);
 
 /// Ceiling on "owed" (accumulated-but-unsent) travel, in milli-counts.
@@ -563,6 +609,20 @@ fn clamp_i8(value: i16) -> i8 {
 /// Throttling / invert come from `crate::config` so a future Vial
 /// `CustomSetValue` write retunes them at runtime without a reboot.
 /// Defaults (no throttle, no invert) match the previous behaviour.
+/// Which axis owns the current scroll burst (dominant-axis lock, 効き pass).
+/// Design rationale at the `AXIS_LOCK_*` constants.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScrollAxisLock {
+    /// Burst just started — neither axis has accumulated enough gross travel
+    /// to claim the wheel. Samples are not banked while undecided (≤ 2 counts
+    /// lost per burst with AXIS_LOCK_THRESHOLD = 3).
+    Undecided,
+    /// Horizontal roll owns the wheel.
+    H,
+    /// Vertical roll owns the wheel.
+    V,
+}
+
 pub struct ScrollProcessor<
     'a,
     const ROW: usize,
@@ -578,7 +638,8 @@ pub struct ScrollProcessor<
     /// some" feels better than "send a giant burst later").
     next_emit_at: Option<Instant>,
     /// Fractional scroll accumulator, in raw PMW3610 counts. One wheel unit
-    /// is emitted per `SCROLL_STEP` accumulated counts; the remainder carries
+    /// is emitted per `config::scroll_step()` accumulated counts (default 30,
+    /// live-tunable via Via 0xC0 id 0x08); the remainder carries
     /// to the next event so slow rolls (per-sample |dx| < STEP) still add up
     /// to a tick instead of being lost to integer truncation.
     scroll_acc: i32,
@@ -591,6 +652,16 @@ pub struct ScrollProcessor<
     /// `None` until the first re-assert. Rate-limits the re-assert to at most
     /// once per `REASSERT_COOLDOWN` so it can never become periodic churn.
     last_reassert: Option<Instant>,
+    /// Dominant-axis lock state for the current burst (効き pass).
+    axis_lock: ScrollAxisLock,
+    /// Decayed gross |counts| seen on H this burst (lock/steal evidence).
+    gross_h: i32,
+    /// Decayed gross |counts| seen on V this burst (lock/steal evidence).
+    gross_v: i32,
+    /// True while the next emitted tick should use the boosted (smaller)
+    /// `SCROLL_FIRST_TICK_STEP` threshold: armed at boot, on idle decay and
+    /// on direction reversal; cleared once a boosted tick actually goes out.
+    boost_next_tick: bool,
 }
 
 impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_ENCODER: usize>
@@ -603,6 +674,10 @@ impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_E
             scroll_acc: 0,
             last_event: None,
             last_reassert: None,
+            axis_lock: ScrollAxisLock::Undecided,
+            gross_h: 0,
+            gross_v: 0,
+            boost_next_tick: true,
         }
     }
 }
@@ -660,52 +735,106 @@ impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_E
                 }
 
                 // Direction (port of the ZMK both-axes->vertical-wheel mapping
-                // the user HW-validated 2026-06-06 in kobu_left.overlay): fold
-                // BOTH roll axes onto the vertical wheel. Horizontal keeps the
+                // the user HW-validated 2026-06-06 in kobu_left.overlay): both
+                // roll axes drive the ONE vertical wheel. Horizontal keeps the
                 // confirmed kobu convention — roll RIGHT (+dx -> +wheel) =
                 // scroll UP, roll LEFT = scroll DOWN (HID wheel: positive =
-                // up); if this module reports a rightward roll as -dx, set
-                // scroll_invert_x=true (Via 0xC0 / web editor) to flip with no
-                // reflash (X only by design — it does NOT cover V). Vertical
-                // is NEGATED: on ZMK this same left ball read roll-up as
-                // -REL_Y and needed Y_INVERT so up=up; AxisRelabel only
-                // renames axes (values pass through), so the same raw sign
-                // arrives here. ASSUMPTION: roll UP = -dy, hence `-vertical`
-                // gives roll UP = wheel+ = scroll UP, roll DOWN = scroll
-                // DOWN. If vertical feels reversed on HW, flip that one sign
-                // below. Known trade-off (accepted on ZMK): folding two axes
-                // into ONE vertical wheel leaves the up+left / down+right
-                // diagonal dead (the X and Y intents oppose and cancel).
-                let h = if config::scroll_invert_x() { -horizontal } else { horizontal };
-                let input = h as i32 + (-(vertical as i32));
+                // up); scroll_invert_x (Via 0xC0 / web editor) flips it with
+                // no reflash. Vertical is NEGATED: on ZMK this same left ball
+                // read roll-up as -REL_Y and needed Y_INVERT so up=up;
+                // AxisRelabel only renames axes (values pass through), so the
+                // same raw sign arrives here — roll UP = -dy, hence the
+                // negation gives roll UP = wheel+ = scroll UP. scroll_invert_y
+                // (id 0x04) — a dead toggle while the axes were summed — now
+                // genuinely flips the V contribution.
+                let h = (if config::scroll_invert_x() { -horizontal } else { horizontal }) as i32;
+                let v = if config::scroll_invert_y() {
+                    vertical as i32
+                } else {
+                    -(vertical as i32)
+                };
 
-                // Idle decay (dead-zone fix): zero a STALE sub-step residue
-                // before banking, so up to SCROLL_STEP-1 = 29 counts left over
-                // from a roll minutes ago can't give the next unrelated touch
-                // a head start (or fight it). See SCROLL_IDLE_DECAY for why
-                // 300 ms keeps genuine slow rolls (60-120 ms sample gaps)
+                // Idle decay (dead-zone fix): a gap ≥ SCROLL_IDLE_DECAY is a
+                // burst boundary. Zero the STALE sub-step residue (so up to
+                // step-1 counts from a roll minutes ago can't give the next
+                // unrelated touch a head start or fight it), release the
+                // dominant-axis lock, and re-arm the first-tick boost so the
+                // fresh gesture answers promptly. See SCROLL_IDLE_DECAY for
+                // why 300 ms keeps genuine slow rolls (60-120 ms sample gaps)
                 // accumulating.
                 if let Some(prev) = self.last_event {
                     if now.duration_since(prev) >= SCROLL_IDLE_DECAY {
                         self.scroll_acc = 0;
+                        self.axis_lock = ScrollAxisLock::Undecided;
+                        self.gross_h = 0;
+                        self.gross_v = 0;
+                        self.boost_next_tick = true;
                     }
                 }
                 self.last_event = Some(now);
 
+                // Dominant-axis lock (効き pass — design rationale at the
+                // AXIS_LOCK_* constants). Decay-then-accumulate each axis's
+                // gross travel, settle who owns the burst, and feed the wheel
+                // the owning axis ALONE — the old `h + (-v)` summation let
+                // the drift axis SUBTRACT from the roll on the up+left /
+                // down+right diagonals (dead diagonal, weakened drifty
+                // rolls).
+                self.gross_h -= self.gross_h / AXIS_GROSS_DECAY_DIV;
+                self.gross_v -= self.gross_v / AXIS_GROSS_DECAY_DIV;
+                self.gross_h += h.abs();
+                self.gross_v += v.abs();
+                match self.axis_lock {
+                    ScrollAxisLock::Undecided => {
+                        if self.gross_h + self.gross_v >= AXIS_LOCK_THRESHOLD {
+                            // Tie goes to V — the overwhelmingly common
+                            // scroll intent on a vertical wheel.
+                            self.axis_lock = if self.gross_h > self.gross_v {
+                                ScrollAxisLock::H
+                            } else {
+                                ScrollAxisLock::V
+                            };
+                        }
+                    }
+                    ScrollAxisLock::H => {
+                        if self.gross_v >= AXIS_LOCK_THRESHOLD
+                            && self.gross_v > AXIS_SWITCH_MARGIN * self.gross_h
+                        {
+                            self.axis_lock = ScrollAxisLock::V;
+                        }
+                    }
+                    ScrollAxisLock::V => {
+                        if self.gross_h >= AXIS_LOCK_THRESHOLD
+                            && self.gross_h > AXIS_SWITCH_MARGIN * self.gross_v
+                        {
+                            self.axis_lock = ScrollAxisLock::H;
+                        }
+                    }
+                }
+                let input = match self.axis_lock {
+                    ScrollAxisLock::Undecided => 0,
+                    ScrollAxisLock::H => h,
+                    ScrollAxisLock::V => v,
+                };
+
                 // Magnitude reduction: the PMW3610 emits a large per-sample
                 // delta at 600 CPI, so emitting raw counts as wheel ticks
                 // scrolled far too fast. Bank raw counts and emit one wheel
-                // unit per SCROLL_STEP counts, carrying the remainder so slow
-                // rolls (per-sample |input| < STEP) still add up to a tick
-                // instead of rounding to zero.
+                // unit per `step` accumulated counts (live-tunable, Via 0xC0
+                // id 0x08, default 30), carrying the remainder so slow rolls
+                // (per-sample |input| < step) still add up to a tick instead
+                // of rounding to zero.
                 //
                 // Direction-flip reset (dead-zone fix): an opposite-sign
-                // residue used to make a reversal pay up to 2*SCROLL_STEP-1 =
-                // 59 counts of dead travel before its first tick. Zero the
-                // bank on a sign flip so the first reversed tick costs exactly
-                // SCROLL_STEP counts.
+                // residue used to make a reversal pay up to 2*step-1 counts
+                // of dead travel before its first tick. Zero the bank on a
+                // sign flip — and re-arm the first-tick boost, so the
+                // reversed direction answers within SCROLL_FIRST_TICK_STEP
+                // counts instead of a full step (効き pass).
+                let step = config::scroll_step();
                 if input != 0 && self.scroll_acc != 0 && input.signum() != self.scroll_acc.signum() {
                     self.scroll_acc = 0;
+                    self.boost_next_tick = true;
                 }
                 self.scroll_acc += input;
                 // Bound the bank so a busy-channel catch-up (units kept on a
@@ -715,11 +844,20 @@ impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_E
                 // willing to emit in one go.
                 self.scroll_acc = self
                     .scroll_acc
-                    .clamp(-SCROLL_MAX_UNITS * SCROLL_STEP, SCROLL_MAX_UNITS * SCROLL_STEP);
-                // truncates toward 0, then hard-cap per-event ticks so a single
-                // fast-spin sample (which at 500 Hz can carry ~90+ counts)
-                // emits a smooth small step instead of one chunky jump.
-                let units = (self.scroll_acc / SCROLL_STEP).clamp(-SCROLL_MAX_UNITS, SCROLL_MAX_UNITS);
+                    .clamp(-SCROLL_MAX_UNITS * step, SCROLL_MAX_UNITS * step);
+                // First tick of a fresh gesture / reversal goes out at the
+                // boosted (smaller) threshold, capped at ±1 unit — the boost
+                // buys latency, not amplitude. Subsequent ticks pay the full
+                // step. Division truncates toward 0, then the per-event cap
+                // keeps a single fast-spin sample (~90+ counts at 500 Hz) a
+                // smooth small step instead of one chunky jump.
+                let effective_step = if self.boost_next_tick {
+                    step.min(SCROLL_FIRST_TICK_STEP)
+                } else {
+                    step
+                };
+                let max_units = if self.boost_next_tick { 1 } else { SCROLL_MAX_UNITS };
+                let units = (self.scroll_acc / effective_step).clamp(-max_units, max_units);
                 if units == 0 {
                     return ProcessResult::Stop;
                 }
@@ -767,7 +905,8 @@ impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_E
                         .try_send(Report::MouseReport(report))
                         .is_ok()
                 {
-                    self.scroll_acc -= units * SCROLL_STEP;
+                    self.scroll_acc -= units * effective_step;
+                    self.boost_next_tick = false;
                     self.next_emit_at = Some(now + throttle);
                     // kobu (round 7 ball-diag): count actual scroll emits so
                     // led-ball-diag can flash BLUE (firmware fine end-to-end).
@@ -1072,10 +1211,10 @@ pub async fn run_input_gate_central() {
     // ~2 s after every connect). 1000 ms still spans the dense stale-resume GATT
     // cache-revalidation burst because set_conn_params (ble/mod.rs) spends
     // 300+300 ms before the fast params land, so the trackball is still admitted
-    // only after host TX credits flow — and the PMW3610 poll is now 8 ms (4x
-    // less flood than the 2 ms that caused the wedge), so 1 s here is safer than
-    // 2 s was at 500 Hz. If a stale-reconnect-while-moving wedge ever recurs,
-    // raise back toward 1500-2000.
+    // only after host TX credits flow — and the PMW3610 poll is 8 ms (4x
+    // less flood than the 2 ms that caused the wedge), so 1 s here is safer
+    // than 2 s was at 500 Hz. If a stale-reconnect-while-moving wedge ever
+    // recurs, raise back toward 1500-2000.
     //
     // kobu: lowered 1000 -> 300 (2026-07-13): Mac-side log measured HID fully
     // attached at ~1.1 s after connect and the GATT burst finishing by ~1.2 s;

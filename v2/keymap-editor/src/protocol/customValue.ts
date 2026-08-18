@@ -27,8 +27,8 @@
  * Firmware side (verified against `v2/firmware/rmk/build.rs`, which
  * patches `rmk-0.8.2/src/host/via/mod.rs` in place):
  *
- *   * `patch_rmk_via_custom_get_kobu`          — ids 0x01..0x07, 0x10, 0x11
- *   * `patch_rmk_via_custom_set_kobu_settings` — ids 0x01..0x07
+ *   * `patch_rmk_via_custom_get_kobu`          — ids 0x01..0x08, 0x10, 0x11
+ *   * `patch_rmk_via_custom_set_kobu_settings` — ids 0x01..0x08
  *   * `patch_rmk_via_custom_save_kobu`         — accepted, no-op
  *
  * ⚠ Writes land in plain atomics (`rmk::input_device::battery::KOBU_*`)
@@ -69,6 +69,7 @@ export interface ValueDef {
     | 'scroll_throttle_ms'
     | 'scroll_invert_x'
     | 'scroll_invert_y'
+    | 'scroll_step'
     | 'status_led_purple_hold_ms'
     | 'status_led_battery_high_threshold'
     | 'status_led_battery_low_threshold'
@@ -100,6 +101,9 @@ export const KOBU_VALUES: readonly ValueDef[] = Object.freeze([
     default: 60,
   },
   { id: 0x07, key: 'status_led_battery_low_threshold', type: 'u8', min: 0, max: 50, default: 20 },
+  // Scroll sensitivity divisor: raw PMW3610 counts per wheel line (効き
+  // pass). Lower = stronger 効き. Firmware clamps to the same 4..=120.
+  { id: 0x08, key: 'scroll_step', type: 'u8', min: 4, max: 120, default: 30 },
   // Read-only battery status, populated by the kobu firmware's bit-tag
   // source tap (see `firmware/src/battery_source.rs`) and answered by the
   // patched RMK `via/mod.rs` `CustomGetValue` handler. `min`/`max`/`default`

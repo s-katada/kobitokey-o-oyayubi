@@ -5,11 +5,13 @@
  * takes effect immediately — drag the cursor-speed slider and the ball
  * responds while you drag.
  *
- * Two of the seven wire slots have no reader in the current firmware
- * (`v2/firmware/rmk/src/config.rs` says so explicitly: the scroll path
- * drives the wheel from the horizontal roll only, and the status LED is
- * layer-driven rather than activity-driven). They are shown disabled
- * rather than hidden, so nobody wonders where they went.
+ * One wire slot has no reader in the current firmware (the status LED is
+ * layer-driven rather than activity-driven, so the purple hold does
+ * nothing). It is shown disabled rather than hidden, so nobody wonders
+ * where it went. scroll_invert_y regained a reader in the 効き pass —
+ * the dominant-axis lock feeds the wheel the vertical roll whenever it
+ * owns the burst — and scroll_step (id 0x08) tunes the counts-per-line
+ * divisor live.
  */
 
 import { useEffect, useId } from 'react';
@@ -45,13 +47,18 @@ const META: Record<KobuSettingKey, Meta> = {
     unit: 'ms',
   },
   scroll_invert_x: {
-    label: 'スクロール方向を反転',
-    description: '左ボールを転がす向きと画面が動く向きを入れ替えます。',
+    label: '横スクロールを反転',
+    description: '左ボールの横方向の転がしと画面が動く向きを入れ替えます。',
   },
   scroll_invert_y: {
     label: '縦スクロールを反転',
-    description: '縦方向のスクロール反転。',
-    inertReason: 'このファームのスクロールは横回転のみを使うため、現在は効果がありません。',
+    description: '左ボールの縦方向の転がしと画面が動く向きを入れ替えます。',
+  },
+  scroll_step: {
+    label: 'スクロール 1 行に必要な回転量',
+    description:
+      'ホイール 1 行分と数えるボールの移動量（センサーカウント）です。下げるほど少ない回転でスクロールが効き、上げるほど落ち着きます。既定は 30。',
+    format: (v) => `≈ ${(v / 23.6).toFixed(2)} mm/行`,
   },
   status_led_purple_hold_ms: {
     label: 'LED 紫の保持時間',
@@ -73,12 +80,18 @@ const META: Record<KobuSettingKey, Meta> = {
   peripheral_battery_percent: { label: '右（ペリフェラル）', description: '' },
 };
 
-const TRACKBALL_KEYS: KobuSettingKey[] = ['trackball_cpi', 'scroll_throttle_ms', 'scroll_invert_x'];
+const TRACKBALL_KEYS: KobuSettingKey[] = [
+  'trackball_cpi',
+  'scroll_step',
+  'scroll_throttle_ms',
+  'scroll_invert_x',
+  'scroll_invert_y',
+];
 const LED_KEYS: KobuSettingKey[] = [
   'status_led_battery_high_threshold',
   'status_led_battery_low_threshold',
 ];
-const INERT_KEYS: KobuSettingKey[] = ['scroll_invert_y', 'status_led_purple_hold_ms'];
+const INERT_KEYS: KobuSettingKey[] = ['status_led_purple_hold_ms'];
 
 function BatteryBar({ label, percent }: { label: string; percent: number | undefined }) {
   const known = typeof percent === 'number';

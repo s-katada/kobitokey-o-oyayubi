@@ -29,6 +29,12 @@
 //!
 //! R/G/B GPIOs P0.26 / P0.30 / P0.06 are common-anode: pin LOW = on, exactly
 //! like the central (`src/status_led.rs`).
+//!
+//! Diagnostic builds replace the normal vocabulary entirely:
+//!   * `led-ball-diag` — RIGHT-ball pipeline health (init / 0xFF rejects /
+//!     sample production); see [`PeripheralLedController::diag_ball_apply`].
+//!   * `led-conn-diag` — split EVENT_CHANNEL depth (R23 追従遅延 hunt); see
+//!     [`PeripheralLedController::diag_apply`].
 
 use core::sync::atomic::Ordering;
 
@@ -37,7 +43,10 @@ use embassy_time::{Duration, Instant};
 use rmk::channel::{CONTROLLER_CHANNEL, ControllerSub};
 use rmk::controller::{Controller, PollingController};
 use rmk::event::ControllerEvent;
-use rmk::input_device::battery::{KOBU_STATUS_LED_BAT_HIGH, KOBU_STATUS_LED_BAT_LOW};
+use rmk::input_device::battery::{
+    KOBU_BALL_FF_REJECTS, KOBU_BALL_INIT_READY, KOBU_PERIPHERAL_SAMPLES,
+    KOBU_STATUS_LED_BAT_HIGH, KOBU_STATUS_LED_BAT_LOW,
+};
 
 /// How long the boot battery colour is shown (while not connected) before
 /// falling through to red.
@@ -52,6 +61,10 @@ enum Color {
     Yellow,
     Red,
     Blue,
+    /// Diagnostic builds only (boot marker in `led-ball-diag`).
+    Purple,
+    /// Diagnostic builds only (flaky-SDIO 0xFF rejects in `led-ball-diag`).
+    White,
 }
 
 /// Battery percent → colour, using the same thresholds as the central (the
@@ -142,6 +155,46 @@ impl<'d> PeripheralLedController<'d> {
         }
     }
 
+    /// Diagnostic (feature `led-ball-diag`), 効き/モソモソ pass 2026-08-16: show
+    /// which layer of the RIGHT (peripheral-local) PMW3610 pipeline is alive —
+    /// the right-ball mirror of the central's `status_led.rs::diag_ball_apply`
+    /// (same vocabulary, minus the central-only scroll-emit rung). The three
+    /// counters are per-bin statics in `rmk::input_device::battery`, maintained
+    /// by the shared pmw3610 driver patches, so on THIS binary they describe the
+    /// RIGHT ball. Priority (top wins), each a swap-and-check per 50 ms tick:
+    ///   Purple : first 5 s after power-on (boot marker — a spontaneous purple
+    ///            mid-session means this half just rebooted/brownout).
+    ///   Red    : sensor init never reached Ready this session (SDIO wedged;
+    ///            `patch_rmk_pmw3610_init_retry_forever` still retrying).
+    ///   White  : an all-0xff burst frame was rejected since the last tick
+    ///            (flaky-SPI garbage — the v1-left-ball failure mode, on the
+    ///            right half's identical bit-banged SDIO).
+    ///   Green  : non-zero motion samples were produced since the last tick
+    ///            (optics + SPI fine at the source; a bad cursor with steady
+    ///            green while rolling moves suspicion downstream to the split
+    ///            link / central / host).
+    ///   Off    : Ready, no rejects, no samples — idle. ⚠ROLLING the ball with
+    ///            the LED stuck Off = the sensor sees nothing = optics (ball
+    ///            material / lens distance / case seating), not firmware.
+    /// Read the atomics directly (not `crate::config`) like `battery_color` —
+    /// the peripheral bin doesn't pull in the central-only helpers.
+    #[allow(dead_code)]
+    fn diag_ball_apply(&mut self) {
+        const BOOT_MARKER_WINDOW_MS: u64 = 5_000;
+        let color = if Instant::now().as_millis() < BOOT_MARKER_WINDOW_MS {
+            Color::Purple
+        } else if !KOBU_BALL_INIT_READY.load(Ordering::Relaxed) {
+            Color::Red
+        } else if KOBU_BALL_FF_REJECTS.swap(0, Ordering::Relaxed) > 0 {
+            Color::White
+        } else if KOBU_PERIPHERAL_SAMPLES.swap(0, Ordering::Relaxed) > 0 {
+            Color::Green
+        } else {
+            Color::Off
+        };
+        self.apply(color);
+    }
+
     /// Diagnostic (feature `led-conn-diag`), v2 — 追従遅延 hunt: show the DEPTH
     /// of this peripheral's EVENT_CHANNEL (the 16-deep queue between the PMW3610
     /// device loop and the split write loop). If pointer samples pool here, queue
@@ -188,6 +241,8 @@ impl<'d> PeripheralLedController<'d> {
             Color::Yellow => (true, true, false),
             Color::Red => (true, false, false),
             Color::Blue => (false, false, true),
+            Color::Purple => (true, false, true),
+            Color::White => (true, true, true),
         };
         if r {
             self.red.set_low();
@@ -229,7 +284,9 @@ impl<'d> Controller for PeripheralLedController<'d> {
                 self.connected = false;
             }
         }
-        if cfg!(feature = "led-conn-diag") {
+        if cfg!(feature = "led-ball-diag") {
+            self.diag_ball_apply();
+        } else if cfg!(feature = "led-conn-diag") {
             self.diag_apply();
         } else {
             let color = self.target_color();
@@ -256,7 +313,9 @@ impl<'d> PollingController for PeripheralLedController<'d> {
     const INTERVAL: Duration = Duration::from_millis(50);
 
     async fn update(&mut self) {
-        if cfg!(feature = "led-conn-diag") {
+        if cfg!(feature = "led-ball-diag") {
+            self.diag_ball_apply();
+        } else if cfg!(feature = "led-conn-diag") {
             self.diag_apply();
         } else {
             let color = self.target_color();

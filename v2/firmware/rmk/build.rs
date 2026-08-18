@@ -1047,10 +1047,12 @@ fn patch_rmk_battery_kobu_atomics() {
 ///
 /// Set / Save are left as warnings — kobu's battery values are read-only.
 fn patch_rmk_via_custom_get_kobu() {
-    // v2 marker covers the extended id table (battery + writable settings).
-    // Earlier kobu builds shipped v1 (battery-only); we leave the legacy
-    // marker in place when found so the patch stays idempotent across
-    // both fresh and previously-patched rmk caches.
+    // v3 marker covers the scroll-step divisor (id 0x08, 効き pass
+    // 2026-08-16). Earlier kobu builds shipped v1 (battery-only) or v2
+    // (settings table); all three cache states are detected and upgraded in
+    // place so fresh and previously-patched rmk caches converge on the same
+    // contents.
+    const MARKER_V3: &str = "// kobu: via CustomGetValue handler for channel 0xC0 (v3 scroll-step) applied";
     const MARKER_V2: &str = "// kobu: via CustomGetValue handler for channel 0xC0 (v2 settings) applied";
     const MARKER_V1: &str = "// kobu: via CustomGetValue handler for channel 0xC0 applied";
     const RMK_VERSION: &str = "0.8.2";
@@ -1069,14 +1071,14 @@ fn patch_rmk_via_custom_get_kobu() {
         panic!("kobu: failed to read {}: {e}", path.display());
     });
 
-    if contents.contains(MARKER_V2) {
+    if contents.contains(MARKER_V3) {
         return;
     }
 
-    // The block we're replacing depends on whether v1 already patched
-    // this file. Cargo's registry cache survives across builds, so when a
-    // user has previously built a kobu firmware the v1 block is present
-    // instead of the original `warn!()`-only stub. Detect both states.
+    // The block we're replacing depends on which kobu build (if any) already
+    // patched this file. Cargo's registry cache survives across builds, so
+    // the original `warn!()`-only stub, the v1 (battery-only) block, or the
+    // v2 (settings-table) block may be present. Detect all three states.
     let original_block = r#"            ViaCommand::CustomGetValue => {
                 // backlight/rgblight/rgb matrix/led matrix/audio settings here
                 warn!("Custom get value -- not supported")
@@ -1107,7 +1109,7 @@ fn patch_rmk_via_custom_get_kobu() {
                 }
             }"#;
 
-    let new_block = r#"            ViaCommand::CustomGetValue => {
+    let v2_block = r#"            ViaCommand::CustomGetValue => {
                 // kobu Via Custom Channel 0xC0 — see firmware/src/config.rs and
                 // web/src/protocol/customValue.ts for the id table.
                 // - 0x01..0x07: read/write runtime settings backed by atomics
@@ -1163,25 +1165,89 @@ fn patch_rmk_via_custom_get_kobu() {
                 }
             }"#;
 
-    let target = if contents.contains(v1_block) {
+    let v3_block = r#"            ViaCommand::CustomGetValue => {
+                // kobu Via Custom Channel 0xC0 — see firmware/src/config.rs and
+                // web/src/protocol/customValue.ts for the id table.
+                // - 0x01..0x08: read/write runtime settings backed by atomics
+                //   in crate::input_device::battery (KOBU_*); the Set arm
+                //   updates the same atomics so reads see live state.
+                // - 0x10/0x11:  read-only battery percentages mirrored from
+                //   kobu's source tap.
+                let channel = report.output_data[1];
+                let id = report.output_data[2];
+                if channel == 0xC0 {
+                    use core::sync::atomic::Ordering;
+                    let kc = &crate::input_device::battery::KOBU_CENTRAL_BATTERY_PERCENT;
+                    let kp = &crate::input_device::battery::KOBU_PERIPHERAL_BATTERY_PERCENT;
+                    match id {
+                        0x01 => {
+                            // u16 BE at bytes 3..5
+                            let v = crate::input_device::battery::KOBU_TRACKBALL_CPI.load(Ordering::Relaxed);
+                            report.input_data[3] = (v >> 8) as u8;
+                            report.input_data[4] = (v & 0xFF) as u8;
+                        }
+                        0x02 => {
+                            report.input_data[3] = crate::input_device::battery::KOBU_SCROLL_THROTTLE_MS.load(Ordering::Relaxed);
+                        }
+                        0x03 => {
+                            report.input_data[3] = if crate::input_device::battery::KOBU_SCROLL_INVERT_X.load(Ordering::Relaxed) { 1 } else { 0 };
+                        }
+                        0x04 => {
+                            report.input_data[3] = if crate::input_device::battery::KOBU_SCROLL_INVERT_Y.load(Ordering::Relaxed) { 1 } else { 0 };
+                        }
+                        0x05 => {
+                            let v = crate::input_device::battery::KOBU_STATUS_LED_PURPLE_HOLD_MS.load(Ordering::Relaxed);
+                            report.input_data[3] = (v >> 8) as u8;
+                            report.input_data[4] = (v & 0xFF) as u8;
+                        }
+                        0x06 => {
+                            report.input_data[3] = crate::input_device::battery::KOBU_STATUS_LED_BAT_HIGH.load(Ordering::Relaxed);
+                        }
+                        0x07 => {
+                            report.input_data[3] = crate::input_device::battery::KOBU_STATUS_LED_BAT_LOW.load(Ordering::Relaxed);
+                        }
+                        0x08 => {
+                            report.input_data[3] = crate::input_device::battery::KOBU_SCROLL_STEP.load(Ordering::Relaxed);
+                        }
+                        0x10 => {
+                            report.input_data[3] = kc.load(Ordering::Relaxed);
+                        }
+                        0x11 => {
+                            report.input_data[3] = kp.load(Ordering::Relaxed);
+                        }
+                        _ => {
+                            warn!("kobu: unknown CustomGetValue id 0x{:02X} on channel 0xC0", id);
+                        }
+                    }
+                } else {
+                    warn!("Custom get value -- not supported");
+                }
+            }"#;
+
+    let target = if contents.contains(v2_block) {
+        v2_block
+    } else if contents.contains(v1_block) {
         v1_block
     } else if contents.contains(original_block) {
         original_block
     } else {
         panic!(
-            "kobu: expected rmk-{RMK_VERSION} host/via/mod.rs CustomGetValue block missing in {} (neither original nor kobu-v1 shape found); \
+            "kobu: expected rmk-{RMK_VERSION} host/via/mod.rs CustomGetValue block missing in {} (no original / kobu-v1 / kobu-v2 shape found); \
              upstream may have changed — update firmware/build.rs",
             path.display()
         );
     };
-    contents = contents.replace(target, new_block);
+    contents = contents.replace(target, v3_block);
 
-    // Strip stale v1 marker, append v2.
+    // Strip stale v1/v2 markers, append v3.
     if contents.contains(MARKER_V1) {
         contents = contents.replace(&format!("\n{}\n", MARKER_V1), "\n");
     }
+    if contents.contains(MARKER_V2) {
+        contents = contents.replace(&format!("\n{}\n", MARKER_V2), "\n");
+    }
     contents.push('\n');
-    contents.push_str(MARKER_V2);
+    contents.push_str(MARKER_V3);
     contents.push('\n');
 
     fs::write(&path, contents).unwrap_or_else(|e| {
@@ -1190,12 +1256,17 @@ fn patch_rmk_via_custom_get_kobu() {
 }
 
 /// Extend the `ViaCommand::CustomSetValue` arm so writes for kobu
-/// channel `0xC0`, ids `0x01..=0x07` mutate the runtime config atomics
+/// channel `0xC0`, ids `0x01..=0x08` mutate the runtime config atomics
 /// in `crate::input_device::battery::KOBU_*`. The existing
 /// peripheral-bootloader-jump branch (channel 0xC0 / id 0x12) is
 /// preserved verbatim; only the trailing `else` warn branch is replaced.
 fn patch_rmk_via_custom_set_kobu_settings() {
-    const MARKER: &str = "// kobu: via CustomSetValue handler for channel 0xC0 settings applied";
+    // v2 marker covers the scroll-step divisor (id 0x08, 効き pass
+    // 2026-08-16). A registry cache previously patched by an older build
+    // carries the v1 marker + settings block; both cache states are
+    // detected and upgraded in place.
+    const MARKER_V2: &str = "// kobu: via CustomSetValue handler for channel 0xC0 (v2 scroll-step) applied";
+    const MARKER_V1: &str = "// kobu: via CustomSetValue handler for channel 0xC0 settings applied";
     const RMK_VERSION: &str = "0.8.2";
 
     let Some(path) = find_rmk_file(RMK_VERSION, "src/host/via/mod.rs") else {
@@ -1208,14 +1279,15 @@ fn patch_rmk_via_custom_set_kobu_settings() {
         panic!("kobu: failed to read {}: {e}", path.display());
     });
 
-    if contents.contains(MARKER) {
+    if contents.contains(MARKER_V2) {
         return;
     }
 
     // Anchor reflects the bootloader-jump-patched Set arm (see
     // `patch_rmk_peripheral_bootloader_jump`). That patch always runs
-    // before this one so the anchor below is what's in the file at
-    // build time.
+    // before this one so on a FRESH cache the anchor below is what's in
+    // the file at build time; a previously-patched cache instead carries
+    // the v1 settings block.
     let bootloader_patched_block = r#"            ViaCommand::CustomSetValue => {
                 // kobu Via Custom Channel 0xC0 — write-only kobu commands
                 // (currently just 0x12 = peripheral bootloader jump).
@@ -1233,7 +1305,7 @@ fn patch_rmk_via_custom_set_kobu_settings() {
                 warn!("Custom set value -- not supported (channel={:02X} id={:02X})", channel, id);
             }"#;
 
-    let new_block = r#"            ViaCommand::CustomSetValue => {
+    let v1_settings_block = r#"            ViaCommand::CustomSetValue => {
                 // kobu Via Custom Channel 0xC0.
                 //   0x01..=0x07: runtime settings — write into the matching
                 //                atomic in crate::input_device::battery.
@@ -1298,17 +1370,96 @@ fn patch_rmk_via_custom_set_kobu_settings() {
                 }
             }"#;
 
-    if !contents.contains(bootloader_patched_block) {
+    let v2_settings_block = r#"            ViaCommand::CustomSetValue => {
+                // kobu Via Custom Channel 0xC0.
+                //   0x01..=0x08: runtime settings — write into the matching
+                //                atomic in crate::input_device::battery.
+                //                Clamping mirrors firmware/src/config.rs.
+                //   0x12:        peripheral bootloader-jump relay (BLE).
+                let channel = report.output_data[1];
+                let id = report.output_data[2];
+                let value = report.output_data[3];
+                let value2 = report.output_data[4];
+                if channel == 0xC0 {
+                    use core::sync::atomic::Ordering;
+                    match id {
+                        0x01 => {
+                            // u16 BE, clamp 200..=3200 — matches
+                            // firmware/src/config.rs::apply.
+                            let raw = ((value as u16) << 8) | (value2 as u16);
+                            let clamped = if raw < 200 { 200 } else if raw > 3200 { 3200 } else { raw };
+                            crate::input_device::battery::KOBU_TRACKBALL_CPI.store(clamped, Ordering::Relaxed);
+                        }
+                        0x02 => {
+                            let v = if value > 50 { 50 } else { value };
+                            crate::input_device::battery::KOBU_SCROLL_THROTTLE_MS.store(v, Ordering::Relaxed);
+                        }
+                        0x03 => {
+                            crate::input_device::battery::KOBU_SCROLL_INVERT_X.store(value != 0, Ordering::Relaxed);
+                        }
+                        0x04 => {
+                            crate::input_device::battery::KOBU_SCROLL_INVERT_Y.store(value != 0, Ordering::Relaxed);
+                        }
+                        0x05 => {
+                            // u16 BE, clamp 0..=2000.
+                            let raw = ((value as u16) << 8) | (value2 as u16);
+                            let clamped = if raw > 2000 { 2000 } else { raw };
+                            crate::input_device::battery::KOBU_STATUS_LED_PURPLE_HOLD_MS.store(clamped, Ordering::Relaxed);
+                        }
+                        0x06 => {
+                            // High threshold ≥ 20, ≤ 100. Keep low<high invariant.
+                            let mut high = if value < 20 { 20 } else if value > 100 { 100 } else { value };
+                            let mut low = crate::input_device::battery::KOBU_STATUS_LED_BAT_LOW.load(Ordering::Relaxed);
+                            if low >= high { core::mem::swap(&mut low, &mut high); }
+                            crate::input_device::battery::KOBU_STATUS_LED_BAT_HIGH.store(high, Ordering::Relaxed);
+                            crate::input_device::battery::KOBU_STATUS_LED_BAT_LOW.store(low, Ordering::Relaxed);
+                        }
+                        0x07 => {
+                            let mut low = if value > 50 { 50 } else { value };
+                            let mut high = crate::input_device::battery::KOBU_STATUS_LED_BAT_HIGH.load(Ordering::Relaxed);
+                            if low >= high { core::mem::swap(&mut low, &mut high); }
+                            crate::input_device::battery::KOBU_STATUS_LED_BAT_HIGH.store(high, Ordering::Relaxed);
+                            crate::input_device::battery::KOBU_STATUS_LED_BAT_LOW.store(low, Ordering::Relaxed);
+                        }
+                        0x08 => {
+                            // Scroll divisor (raw counts per wheel tick),
+                            // clamp 4..=120 — matches firmware/src/config.rs.
+                            let v = if value < 4 { 4 } else if value > 120 { 120 } else { value };
+                            crate::input_device::battery::KOBU_SCROLL_STEP.store(v, Ordering::Relaxed);
+                        }
+                        #[cfg(all(feature = "_ble", feature = "split", feature = "controller"))]
+                        0x12 if value == 1 => {
+                            warn!("kobu: publishing PeripheralBootloaderJump from Via CustomSetValue");
+                            crate::channel::send_controller_event_new(crate::event::ControllerEvent::PeripheralBootloaderJump);
+                        }
+                        _ => {
+                            warn!("kobu: unknown CustomSetValue id 0x{:02X} on channel 0xC0", id);
+                        }
+                    }
+                } else {
+                    warn!("Custom set value -- not supported (channel={:02X} id={:02X})", channel, id);
+                }
+            }"#;
+
+    let target = if contents.contains(v1_settings_block) {
+        v1_settings_block
+    } else if contents.contains(bootloader_patched_block) {
+        bootloader_patched_block
+    } else {
         panic!(
-            "kobu: expected rmk-{RMK_VERSION} host/via/mod.rs CustomSetValue (bootloader-patched) block missing in {}; \
+            "kobu: expected rmk-{RMK_VERSION} host/via/mod.rs CustomSetValue block missing in {} (neither bootloader-patched nor kobu-v1-settings shape found); \
              upstream may have changed or peripheral-bootloader-jump patch is out of sync — update firmware/build.rs",
             path.display()
         );
-    }
-    contents = contents.replace(bootloader_patched_block, new_block);
+    };
+    contents = contents.replace(target, v2_settings_block);
 
+    // Strip the stale v1 marker, append v2.
+    if contents.contains(MARKER_V1) {
+        contents = contents.replace(&format!("\n{}\n", MARKER_V1), "\n");
+    }
     contents.push('\n');
-    contents.push_str(MARKER);
+    contents.push_str(MARKER_V2);
     contents.push('\n');
 
     fs::write(&path, contents).unwrap_or_else(|e| {
@@ -1377,7 +1528,13 @@ fn patch_rmk_via_custom_save_kobu() {
 /// single import path. Mirrors the schema in
 /// `firmware/src/config.rs::KobuSettings`.
 fn patch_rmk_kobu_settings_atomics() {
-    const MARKER: &str = "// kobu: writable runtime settings atomics applied";
+    // v2 marker covers the scroll-step divisor added by the 効き pass
+    // (2026-08-16). A registry cache previously patched by an older build
+    // carries the v1 marker + every static except KOBU_SCROLL_STEP; we top
+    // the file up incrementally so fresh and previously-patched caches
+    // converge on the same contents.
+    const MARKER_V2: &str = "// kobu: writable runtime settings atomics (v2 scroll-step) applied";
+    const MARKER_V1: &str = "// kobu: writable runtime settings atomics applied";
     const RMK_VERSION: &str = "0.8.2";
 
     let Some(path) = find_rmk_file(RMK_VERSION, "src/input_device/battery.rs") else {
@@ -1390,27 +1547,47 @@ fn patch_rmk_kobu_settings_atomics() {
         panic!("kobu: failed to read {}: {e}", path.display());
     });
 
-    if contents.contains(MARKER) {
+    if contents.contains(MARKER_V2) {
         return;
     }
 
-    // Anchor: the last line of the battery-percent injection from
-    // `patch_rmk_battery_kobu_atomics`. That patch runs before this
-    // one, so the anchor is always in the file at this point.
-    let anchor = "pub static KOBU_PERIPHERAL_BATTERY_PERCENT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);";
-    if !contents.contains(anchor) {
-        panic!(
-            "kobu: expected battery-percent anchor in rmk-{RMK_VERSION} input_device/battery.rs at {}; \
-             patch_rmk_battery_kobu_atomics must run first — order in build.rs::main",
-            path.display()
+    // Keep in sync with `KobuSettings::default().scroll_step` and the Set
+    // handler clamp in `patch_rmk_via_custom_set_kobu_settings`.
+    const SCROLL_STEP_STATIC: &str = "pub static KOBU_SCROLL_STEP: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(30);";
+
+    if contents.contains(MARKER_V1) {
+        // v1-patched cache: append the new static after the last v1 one.
+        let anchor = "pub static KOBU_STATUS_LED_BAT_LOW: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(20);";
+        if !contents.contains(anchor) {
+            panic!(
+                "kobu: v1 settings-atomics marker present but KOBU_STATUS_LED_BAT_LOW anchor missing in {}; \
+                 registry cache is in an unexpected state — delete the rmk-{RMK_VERSION} registry src dir and rebuild",
+                path.display()
+            );
+        }
+        contents = contents.replace(anchor, &format!("{anchor}\n{SCROLL_STEP_STATIC}"));
+        contents = contents.replace(&format!("\n{MARKER_V1}\n"), "\n");
+    } else {
+        // Fresh cache: inject the whole settings block. Anchor: the last
+        // line of the battery-percent injection from
+        // `patch_rmk_battery_kobu_atomics`. That patch runs before this
+        // one, so the anchor is always in the file at this point.
+        let anchor = "pub static KOBU_PERIPHERAL_BATTERY_PERCENT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);";
+        if !contents.contains(anchor) {
+            panic!(
+                "kobu: expected battery-percent anchor in rmk-{RMK_VERSION} input_device/battery.rs at {}; \
+                 patch_rmk_battery_kobu_atomics must run first — order in build.rs::main",
+                path.display()
+            );
+        }
+        let injected = format!(
+            "{anchor}\n\n// kobu: writable runtime settings. Mirrors firmware/src/config.rs schema.\n// The Via Custom Set handler in host/via/mod.rs writes here on a host\n// SetValue; firmware/src/{{trackball,status_led}}.rs read via thin\n// helpers in firmware/src/config.rs. Default values must match\n// `KobuSettings::default()` so a fresh build behaves identically.\npub static KOBU_TRACKBALL_CPI: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(1000);\npub static KOBU_SCROLL_THROTTLE_MS: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);\npub static KOBU_SCROLL_INVERT_X: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);\npub static KOBU_SCROLL_INVERT_Y: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);\npub static KOBU_STATUS_LED_PURPLE_HOLD_MS: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(200);\npub static KOBU_STATUS_LED_BAT_HIGH: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(60);\npub static KOBU_STATUS_LED_BAT_LOW: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(20);\n{SCROLL_STEP_STATIC}"
         );
+        contents = contents.replace(anchor, &injected);
     }
 
-    let injected = "pub static KOBU_PERIPHERAL_BATTERY_PERCENT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);\n\n// kobu: writable runtime settings. Mirrors firmware/src/config.rs schema.\n// The Via Custom Set handler in host/via/mod.rs writes here on a host\n// SetValue; firmware/src/{trackball,status_led}.rs read via thin\n// helpers in firmware/src/config.rs. Default values must match\n// `KobuSettings::default()` so a fresh build behaves identically.\npub static KOBU_TRACKBALL_CPI: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(1000);\npub static KOBU_SCROLL_THROTTLE_MS: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);\npub static KOBU_SCROLL_INVERT_X: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);\npub static KOBU_SCROLL_INVERT_Y: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);\npub static KOBU_STATUS_LED_PURPLE_HOLD_MS: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(200);\npub static KOBU_STATUS_LED_BAT_HIGH: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(60);\npub static KOBU_STATUS_LED_BAT_LOW: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(20);";
-    contents = contents.replace(anchor, injected);
-
     contents.push('\n');
-    contents.push_str(MARKER);
+    contents.push_str(MARKER_V2);
     contents.push('\n');
 
     fs::write(&path, contents).unwrap_or_else(|e| {
@@ -3200,25 +3377,34 @@ fn patch_rmk_capture_mouse_buttons() {
     });
 }
 
-/// Round 7 wedge mitigation (radio-contention lever): lower the PMW3610 default
-/// poll interval from 500 µs (2 kHz) to 2 ms (500 Hz). The RIGHT trackball
-/// forwards one split-link BLE notification per non-zero sample; at 2 kHz that
-/// flood competes with the Mac link's connect/encryption for the single nRF
-/// radio during bring-up. 500 Hz is still ~7× the host HID report rate and the
-/// central coalesces motion (run_pointer_flush) so NO travel is lost and the
-/// cursor feel is unchanged — but the split-link packet rate (and the radio
-/// airtime it costs during bring-up) drops 4×. Affects both halves' PMW3610
-/// (the central scroll ball too — harmless at 500 Hz).
+/// Set the PMW3610 default poll interval (currently 8 ms / 125 Hz — a 4 ms
+/// experiment was rolled back same-day as HW-worse; see the history at the
+/// marker constants inside). Originally a round 7
+/// wedge mitigation (radio-contention lever): the RIGHT trackball forwards one
+/// split-link BLE notification per non-zero sample, and at the upstream 500 µs
+/// (2 kHz) that flood competed with the Mac link's connect/encryption for the
+/// single nRF radio during bring-up. The PMW3610 integrates counts between
+/// reads, so NO travel is lost at any rate — the interval trades split-link
+/// airtime against delivery granularity. Affects both halves' PMW3610 (the
+/// central scroll ball too — its ScrollProcessor banks counts, so scroll feel
+/// is rate-independent).
 fn patch_rmk_pmw3610_slower_poll() {
-    // ZMK (KobitoKey, smooth reference) reports the pointer at CONFIG_PMW3610_
-    // REPORT_INTERVAL_MIN = 8 ms (≈125 Hz), matched to its sensor RUN-RATE and
-    // its ~7.5-15 ms BLE links. kobu polled at 2 ms (500 Hz), a ~3.7× over-feed
-    // of the 7.5 ms (~133 Hz) split link, so every drop-oldest queue on the
-    // right-half path discarded pointer samples ("もっさり"). 8 ms matches ZMK:
-    // the PMW3610 hardware accumulates counts between reads, so NO travel is
-    // lost — it is just delivered as ~125 fuller samples/s instead of ~500 thin
-    // ones, so the source no longer over-feeds the link.
-    const MARKER: &str = "// kobu: PMW3610 default poll -> 8ms (ZMK REPORT_INTERVAL_MIN parity) applied";
+    // Poll-interval history: upstream 500 µs (2 kHz) → kobu 2 ms (500 Hz,
+    // bring-up radio-flood trim) → 8 ms (125 Hz, ZMK REPORT_INTERVAL_MIN
+    // parity — at 2 ms the split-link drop-oldest queues discarded samples,
+    // "もっさり") → 4 ms (250 Hz, モソモソ pass 2026-08-17: theory was that
+    // denser chunks halve the per-host-report delta variance macOS accel keys
+    // off) → **8 ms again (SAME DAY rollback: the user felt 4 ms as WORSE on
+    // real HW — 「悪化した感じ」)**.
+    //
+    // ⚠ Empirical ordering on this hardware is 8 ms > 4 ms > (2 ms broken) for
+    // pointer feel. The delta-variance theory did NOT survive contact with the
+    // device — do not re-try faster polls blindly; if this is ever revisited,
+    // instrument first (led-conn-diag peripheral queue depth + central band)
+    // and change ONLY with on-device evidence.
+    const MARKER: &str = "// kobu: PMW3610 default poll -> 8ms (rolled back from 4ms, HW-worse 2026-08-17) applied";
+    const OLD_MARKER_8MS: &str = "// kobu: PMW3610 default poll -> 8ms (ZMK REPORT_INTERVAL_MIN parity) applied";
+    const OLD_MARKER_4MS: &str = "// kobu: PMW3610 default poll -> 4ms (pointer smoothness pass) applied";
     const OLD_MARKER_2MS: &str = "// kobu: PMW3610 default poll 500us -> 2ms applied";
     const RMK_VERSION: &str = "0.8.2";
 
@@ -3240,29 +3426,44 @@ fn patch_rmk_pmw3610_slower_poll() {
         return;
     }
 
-    // Dual anchor: a PRISTINE registry has the upstream `from_micros(500)`; a
-    // registry already carrying the prior kobu 2 ms patch has the 2000 literal.
-    // Replace whichever is present (mirrors patch_rmk_via_custom_get_kobu's
-    // v1/original dual-anchor). With this scheme `cargo clean -p rmk` is enough
-    // to re-apply over an already-patched registry — no pristine re-extract.
+    // Multi-anchor: a PRISTINE registry has the upstream `from_micros(500)`;
+    // previously-patched registries carry the 2 ms, 8 ms (old marker) or 4 ms
+    // kobu line. Replace whichever is present (mirrors
+    // patch_rmk_via_custom_get_kobu's multi-anchor). With this scheme
+    // `cargo clean -p rmk` is enough to re-apply over an already-patched
+    // registry — no pristine re-extract. The 8 ms target line is byte-equal to
+    // the pre-4ms one, so an old-8ms-marker registry needs only its marker
+    // refreshed (the contains(&to) arm).
     let pristine = "poll_interval: Duration::from_micros(500),";
     let prior_2ms = "poll_interval: Duration::from_micros(2000), // kobu: 500us->2ms, cut split-link radio flood during BLE bring-up (central coalesces, no feel change)";
+    let prior_4ms = "poll_interval: Duration::from_micros(4000), // kobu: 4ms = 250Hz — halves per-host-report delta variance (macOS accel gain wobble while aiming) and optical-dropout freeze quanta vs 8ms; still half the 500Hz the split link carried for months, and the bring-up flood is blocked by the input gate";
     let to = "poll_interval: Duration::from_micros(8000), // kobu: 8ms = ZMK CONFIG_PMW3610_REPORT_INTERVAL_MIN=8 -> ~125Hz, matched to the 7.5ms split-link deliverable rate so the source no longer over-feeds the drop-oldest queues";
-    if contents.contains(prior_2ms) {
+    if contents.contains(prior_4ms) {
+        contents = contents.replace(prior_4ms, to);
+    } else if contents.contains(to) {
+        // Line already 8 ms (registry patched by the pre-4ms build) — only the
+        // marker bookkeeping below is needed.
+    } else if contents.contains(prior_2ms) {
         contents = contents.replace(prior_2ms, to);
     } else if contents.contains(pristine) {
         contents = contents.replace(pristine, to);
     } else {
         panic!(
-            "kobu: expected rmk-{RMK_VERSION} pmw3610.rs poll_interval anchor (neither pristine 500us nor prior 2ms) missing in {}; \
+            "kobu: expected rmk-{RMK_VERSION} pmw3610.rs poll_interval anchor (no pristine 500us / prior 2ms / prior 4ms / 8ms shape) missing in {}; \
              upstream may have changed — update firmware/build.rs::patch_rmk_pmw3610_slower_poll",
             path.display()
         );
     }
 
-    // Strip the stale 2 ms marker line so the file does not accumulate markers.
+    // Strip stale marker lines so the file does not accumulate markers.
     if contents.contains(OLD_MARKER_2MS) {
         contents = contents.replace(&format!("\n{}\n", OLD_MARKER_2MS), "\n");
+    }
+    if contents.contains(OLD_MARKER_8MS) {
+        contents = contents.replace(&format!("\n{}\n", OLD_MARKER_8MS), "\n");
+    }
+    if contents.contains(OLD_MARKER_4MS) {
+        contents = contents.replace(&format!("\n{}\n", OLD_MARKER_4MS), "\n");
     }
 
     contents.push('\n');
