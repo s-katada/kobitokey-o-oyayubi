@@ -228,17 +228,26 @@ pub async fn run_auto_mouse_layer<
     // fixed 3 s, which could expire *inside* a slow Mac connect. Generous
     // fallback so a host-less bring-up (USB-only bench testing, or a host that
     // never reads GATT) still arms auto-mouse eventually.
+    //
+    // 2026-08-18: also arm on a live WIRED host (`rmk::usb::kobu_usb_hid_ready`,
+    // injected by build.rs::patch_rmk_usb_hid_ready_flag). With the ZMK-parity
+    // endpoint arbitration a cable-in boot now parks BLE entirely, so gating on
+    // the BLE link alone would leave a wired session waiting out the full 12 s
+    // fallback with no mouse layer. The wedge this gate protects against is the
+    // Mac connect+encryption window, which a wired boot never enters — and the
+    // flag is enumeration-gated, so a mere charger cannot open it.
     {
         let mut waited_ms = 0u64;
-        while !config::host_connected() && waited_ms < 12_000 {
+        while !(config::host_connected() || rmk::usb::kobu_usb_hid_ready()) && waited_ms < 12_000 {
             Timer::after_millis(100).await;
             waited_ms += 100;
         }
         // Small settle after the link is up before arming.
         Timer::after_millis(300).await;
         defmt::info!(
-            "kobu: auto-mouse armed (host_connected={})",
-            config::host_connected()
+            "kobu: auto-mouse armed (host_connected={}, usb_hid={})",
+            config::host_connected(),
+            rmk::usb::kobu_usb_hid_ready()
         );
     }
     // Discard motion banked during the delay so the first armed pulse starts a

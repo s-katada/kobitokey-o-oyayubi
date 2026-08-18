@@ -294,6 +294,16 @@ fn main() {
     patch_rmk_split_connect_timeout_widen();
     patch_rmk_split_adv_set_token();
 
+    // USB/BLE endpoint arbitration (2026-08-18): "BLE でつないだまま有線に挿すと
+    // 入力できない" の修正。rmk-0.8.2 は接続先をループ先頭で一度しか決めず、BLE
+    // が接続した瞬間に USB キーボード future を捨てるので、有線側は列挙される
+    // だけでレポートが 1 本も出ない。part 1 は usb/mod.rs に ZMK の
+    // `zmk_usb_is_hid_ready()` 相当のフラグを、part 2 は ble/mod.rs の
+    // BLE-priority ブランチに「有線ホストが来たら乗り換える / 抜けたら戻る」を
+    // 入れる。NEW registry patches ⇒ one `cargo clean --release -p rmk` first.
+    patch_rmk_usb_hid_ready_flag();
+    patch_rmk_usb_takes_over_ble();
+
     generate_vial_config();
 
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
@@ -7527,4 +7537,356 @@ pub static KOBU_SPLIT_SET_TOKEN: core::sync::atomic::AtomicU8 = core::sync::atom
             });
         }
     }
+}
+
+/// kobu (2026-08-18): ZMK-parity USB/BLE endpoint arbitration, part 1/2 —
+/// publish a real "the wired host can receive HID reports" flag.
+///
+/// Upstream rmk only exposes `USB_ENABLED` / `USB_SUSPENDED`, and `USB_ENABLED`
+/// is signalled from BOTH `enabled(true)` (the USB bus powered up = VBUS
+/// present, which a dumb charger does too) and `configured(true)` (a real host
+/// finished enumeration). Arbitrating the endpoint on it would hand the
+/// keyboard to a charger and type into a void. ZMK gates its USB endpoint on
+/// `zmk_usb_is_hid_ready()` == CONFIGURED && !suspended; the flags injected
+/// here reproduce exactly that, and `KOBU_USB_READY_CHANGED` wakes the
+/// arbitration futures on every transition.
+///
+/// The `kobu_wait_usb_hid_*` helpers debounce the edge: enumeration bounces
+/// (bus reset, brief suspends) and every takeover costs a BLE disconnect +
+/// reconnect, so a blip must not flap the endpoint.
+fn patch_rmk_usb_hid_ready_flag() {
+    const MARKER: &str = "// kobu: USB HID-ready flag (ZMK-parity endpoint arbitration) applied";
+    const RMK_VERSION: &str = "0.8.2";
+
+    let Some(path) = find_rmk_file(RMK_VERSION, "src/usb/mod.rs") else {
+        println!(
+            "cargo:warning=kobu: could not find rmk-{RMK_VERSION} usb/mod.rs; USB HID-ready flag not applied"
+        );
+        return;
+    };
+
+    println!("cargo:rerun-if-changed={}", path.display());
+
+    let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("kobu: failed to read {}: {e}", path.display());
+    });
+
+    if contents.contains(MARKER) {
+        return;
+    }
+
+    // (label, from, to)
+    let replacements: [(&str, &str, &str); 5] = [
+        (
+            "ready-flag statics + helpers",
+            r#"pub(crate) static USB_ENABLED: Signal<crate::RawMutex, ()> = Signal::new();
+pub(crate) static USB_SUSPENDED: Signal<crate::RawMutex, ()> = Signal::new();"#,
+            r#"pub(crate) static USB_ENABLED: Signal<crate::RawMutex, ()> = Signal::new();
+pub(crate) static USB_SUSPENDED: Signal<crate::RawMutex, ()> = Signal::new();
+
+// kobu (2026-08-18): ZMK-parity endpoint arbitration, part 1/2.
+// `USB_ENABLED` cannot answer "can the wired host receive HID?" — it is also
+// signalled from `enabled(true)`, which a dumb charger triggers. These flags
+// mirror ZMK `zmk_usb_is_hid_ready()`: enumerated by a real host AND not
+// suspended. Written from the embassy-usb device callbacks below.
+pub static KOBU_USB_CONFIGURED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+pub static KOBU_USB_SUSPEND: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+pub(crate) static KOBU_USB_READY_CHANGED: Signal<crate::RawMutex, ()> = Signal::new();
+
+/// kobu: true when the USB HID endpoints can actually carry reports.
+pub fn kobu_usb_hid_ready() -> bool {
+    KOBU_USB_CONFIGURED.load(Ordering::Acquire) && !KOBU_USB_SUSPEND.load(Ordering::Acquire)
+}
+
+/// kobu: record a USB endpoint transition and wake the arbitration futures.
+fn kobu_set_usb_endpoint_state(configured: Option<bool>, suspended: Option<bool>) {
+    if let Some(configured) = configured {
+        KOBU_USB_CONFIGURED.store(configured, Ordering::Release);
+    }
+    if let Some(suspended) = suspended {
+        KOBU_USB_SUSPEND.store(suspended, Ordering::Release);
+    }
+    KOBU_USB_READY_CHANGED.signal(());
+}
+
+/// kobu: resolves once a wired host has been HID-ready for DEBOUNCE_MS.
+#[allow(dead_code)]
+pub(crate) async fn kobu_wait_usb_hid_ready() {
+    const DEBOUNCE_MS: u64 = 300;
+    loop {
+        while !kobu_usb_hid_ready() {
+            KOBU_USB_READY_CHANGED.wait().await;
+        }
+        embassy_time::Timer::after_millis(DEBOUNCE_MS).await;
+        if kobu_usb_hid_ready() {
+            return;
+        }
+    }
+}
+
+/// kobu: resolves once the wired host has been gone for DEBOUNCE_MS.
+#[allow(dead_code)]
+pub(crate) async fn kobu_wait_usb_hid_gone() {
+    const DEBOUNCE_MS: u64 = 200;
+    loop {
+        while kobu_usb_hid_ready() {
+            KOBU_USB_READY_CHANGED.wait().await;
+        }
+        embassy_time::Timer::after_millis(DEBOUNCE_MS).await;
+        if !kobu_usb_hid_ready() {
+            return;
+        }
+    }
+}"#,
+        ),
+        (
+            "enabled(false) clears the wired endpoint",
+            r#"            info!("Device disabled");
+            if USB_ENABLED.signaled() {"#,
+            r#"            info!("Device disabled");
+            // kobu: bus powered down (cable pulled) — the wired endpoint is gone.
+            kobu_set_usb_endpoint_state(Some(false), Some(false));
+            if USB_ENABLED.signaled() {"#,
+        ),
+        (
+            "configured() drives the wired endpoint",
+            r#"            CONNECTION_STATE.store(ConnectionState::Connected.into(), Ordering::Release);
+            USB_ENABLED.signal(());
+            info!("Device configured, it may now draw up to the configured current from Vbus.")
+        } else {
+            info!("Device is no longer configured, the Vbus current limit is 100mA.");
+        }"#,
+            r#"            CONNECTION_STATE.store(ConnectionState::Connected.into(), Ordering::Release);
+            USB_ENABLED.signal(());
+            // kobu: a real host finished enumeration — the wired endpoint is live.
+            kobu_set_usb_endpoint_state(Some(true), Some(false));
+            info!("Device configured, it may now draw up to the configured current from Vbus.")
+        } else {
+            // kobu: host dropped the configuration — wired endpoint is gone.
+            kobu_set_usb_endpoint_state(Some(false), None);
+            info!("Device is no longer configured, the Vbus current limit is 100mA.");
+        }"#,
+        ),
+        (
+            "suspended(true) parks the wired endpoint",
+            r#"            USB_SUSPENDED.signal(());
+        } else {"#,
+            r#"            // kobu: host suspended the port (machine asleep) — endpoint parked.
+            kobu_set_usb_endpoint_state(None, Some(true));
+            USB_SUSPENDED.signal(());
+        } else {"#,
+        ),
+        (
+            "suspended(false) revives the wired endpoint",
+            r#"            USB_SUSPENDED.reset();"#,
+            r#"            // kobu: host resumed — endpoint live again if still configured.
+            kobu_set_usb_endpoint_state(None, Some(false));
+            USB_SUSPENDED.reset();"#,
+        ),
+    ];
+
+    for (label, from, to) in replacements {
+        if !contents.contains(from) {
+            panic!(
+                "kobu: expected rmk-{RMK_VERSION} usb/mod.rs {label} anchor missing in {}; \
+                 upstream may have changed — update firmware/build.rs::patch_rmk_usb_hid_ready_flag",
+                path.display()
+            );
+        }
+        contents = contents.replace(from, to);
+    }
+
+    contents.push('\n');
+    contents.push_str(MARKER);
+    contents.push('\n');
+
+    fs::write(&path, contents).unwrap_or_else(|e| {
+        panic!("kobu: failed to write {}: {e}", path.display());
+    });
+}
+
+/// kobu (2026-08-18): ZMK-parity USB/BLE endpoint arbitration, part 2/2 — let a
+/// wired host actually take the keyboard over from a live BLE link.
+///
+/// Symptom: connected to the Mac over BLE, plug the keyboard into the Linux
+/// box, and nothing types there. The USB device still enumerates (lsusb sees
+/// it — the background `usb_task` keeps `usb_device.run_until_suspend()` alive
+/// regardless of which endpoint owns the keyboard), but not one HID report ever
+/// reaches it: every keystroke keeps going to the BLE host.
+///
+/// Root cause: rmk-0.8.2 picks the endpoint ONCE per loop iteration and never
+/// re-evaluates it against USB cable state. The BLE-priority branch
+/// (`ConnectionType::Ble` in ble/mod.rs) runs the USB keyboard only as the
+/// second arm of `select3(adv_fut, usb_fut, ...)` — i.e. *while advertising*.
+/// The moment `adv_fut` yields a connection that arm is dropped and the code
+/// awaits `select(run_ble_keyboard(..), update_profile())`, which watches
+/// nothing USB-related. So the wired endpoint stays mute until the BLE link
+/// drops — or until the User7 = ToggleConnection keycode is pressed, which
+/// kobu does not bind. (`patch_rmk_force_ble_conn_type` additionally pins
+/// CONNECTION_TYPE=Ble at boot, so the USB-priority branch is never taken.)
+///
+/// ZMK re-selects its endpoint on every USB/BLE state change and prefers USB
+/// when both are ready — hence "小人キーはちゃんと切り替わる". This patch gives
+/// kobu the same behaviour:
+///
+///   * BLE connected + wired host appears -> drop the BLE keyboard and let
+///     `conn` fall out of scope (trouble-host disconnects the link), then loop.
+///   * loop top with a wired host present -> park BLE entirely (no advertising,
+///     no connection) and run the USB keyboard until the cable/host goes away,
+///     then loop back into advertising so the Mac reconnects on its own.
+///
+/// Parking BLE instead of keeping it connected is deliberate: rmk drains ONE
+/// `KEYBOARD_REPORT_CHANNEL` with ONE writer, so two live host endpoints would
+/// race for every report. The split link to the right half is a different
+/// future (`run_peripheral_manager` / `scan_peripherals`, joined in
+/// src/central.rs) and is untouched — the right hand keeps working while wired.
+///
+/// Readiness comes from `patch_rmk_usb_hid_ready_flag` (part 1/2), which gates
+/// on enumeration rather than VBUS so a charger cannot steal the keyboard.
+fn patch_rmk_usb_takes_over_ble() {
+    const MARKER: &str = "// kobu: wired host takes over from BLE (ZMK-parity arbitration) applied";
+    const RMK_VERSION: &str = "0.8.2";
+
+    let Some(path) = find_rmk_file(RMK_VERSION, "src/ble/mod.rs") else {
+        return;
+    };
+
+    println!("cargo:rerun-if-changed={}", path.display());
+
+    let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("kobu: failed to read {}: {e}", path.display());
+    });
+
+    if contents.contains(MARKER) {
+        return;
+    }
+
+    // (label, from, to)
+    let replacements: [(&str, &str, &str); 4] = [
+        (
+            "BLE-priority loop-top USB takeover",
+            r#"                    ConnectionType::Ble => {
+                        info!("BLE priority mode, running USB keyboard while advertising");"#,
+            r#"                    ConnectionType::Ble => {
+                        // kobu (2026-08-18): ZMK-parity endpoint arbitration. A wired
+                        // host that actually enumerated us owns the keyboard: park BLE
+                        // (no advertising, no connection) and run the USB keyboard
+                        // until the cable / host goes away. Upstream runs the USB
+                        // keyboard only *while advertising* and drops it the instant
+                        // BLE connects, which leaves the wired machine holding an
+                        // enumerated-but-mute HID device.
+                        if crate::usb::kobu_usb_hid_ready() {
+                            info!("kobu: wired host ready, running USB keyboard (BLE parked)");
+                            #[cfg(feature = "controller")]
+                            send_controller_event(
+                                &mut controller_pub,
+                                ControllerEvent::BleState(0, BleState::None),
+                            );
+                            let usb_only_fut = run_keyboard(
+                                #[cfg(feature = "storage")]
+                                storage,
+                                #[cfg(feature = "host")]
+                                keymap,
+                                #[cfg(feature = "host")]
+                                UsbHostReaderWriter::new(&mut host_reader_writer),
+                                #[cfg(feature = "vial")]
+                                rmk_config.vial_config,
+                                // Ends when the wired host disappears (unplug,
+                                // de-configure, or host suspend), debounced.
+                                crate::usb::kobu_wait_usb_hid_gone(),
+                                UsbLedReader::new(&mut keyboard_reader),
+                                UsbKeyboardWriter::new(&mut keyboard_writer, &mut other_writer),
+                            );
+                            select(usb_only_fut, profile_manager.update_profile()).await;
+                            info!("kobu: wired host gone, back to BLE priority");
+                            continue;
+                        }
+                        info!("BLE priority mode, running USB keyboard while advertising");"#,
+        ),
+        (
+            "BLE-connected watches for a wired host",
+            r#"                                info!("BLE connected, running BLE keyboard");
+                                select(
+                                    run_ble_keyboard(
+                                        &server,
+                                        &conn,
+                                        stack,
+                                        #[cfg(feature = "host")]
+                                        keymap,
+                                        #[cfg(feature = "host")]
+                                        &mut rmk_config,
+                                        #[cfg(feature = "storage")]
+                                        storage,
+                                    ),
+                                    profile_manager.update_profile(),
+                                )
+                                .await;"#,
+            r#"                                info!("BLE connected, running BLE keyboard");
+                                // kobu: third arm = a wired host became HID-ready.
+                                // Winning it drops the BLE keyboard and lets `conn`
+                                // fall out of scope (trouble-host closes the link);
+                                // the loop top then takes the USB branch above.
+                                select3(
+                                    run_ble_keyboard(
+                                        &server,
+                                        &conn,
+                                        stack,
+                                        #[cfg(feature = "host")]
+                                        keymap,
+                                        #[cfg(feature = "host")]
+                                        &mut rmk_config,
+                                        #[cfg(feature = "storage")]
+                                        storage,
+                                    ),
+                                    profile_manager.update_profile(),
+                                    crate::usb::kobu_wait_usb_hid_ready(),
+                                )
+                                .await;"#,
+        ),
+        (
+            "advertising stops when a wired host appears",
+            r#"                        match select3(adv_fut, usb_fut, profile_manager.update_profile()).await {
+                            Either3::First(Ok(conn)) => {"#,
+            r#"                        match select4(
+                            adv_fut,
+                            usb_fut,
+                            profile_manager.update_profile(),
+                            // kobu: a wired host became HID-ready while we were
+                            // advertising (the usual case is a cable-in cold boot,
+                            // where enumeration finishes a beat before the Mac
+                            // reconnects). Stop advertising and let the loop top park
+                            // BLE, so the Mac cannot grab the link out from under the
+                            // cable and bounce the endpoint. Falls through the `_`
+                            // arm below into the 200 ms retry sleep and re-loops.
+                            crate::usb::kobu_wait_usb_hid_ready(),
+                        )
+                        .await
+                        {
+                            Either4::First(Ok(conn)) => {"#,
+        ),
+        (
+            "advertising-timeout arm follows the select4 widening",
+            r#"                            Either3::First(Err(BleHostError::BleHost(Error::Timeout))) => {"#,
+            r#"                            Either4::First(Err(BleHostError::BleHost(Error::Timeout))) => {"#,
+        ),
+    ];
+
+    for (label, from, to) in replacements {
+        if !contents.contains(from) {
+            panic!(
+                "kobu: expected rmk-{RMK_VERSION} ble/mod.rs {label} anchor missing in {}; \
+                 upstream may have changed — update firmware/build.rs::patch_rmk_usb_takes_over_ble",
+                path.display()
+            );
+        }
+        contents = contents.replace(from, to);
+    }
+
+    contents.push('\n');
+    contents.push_str(MARKER);
+    contents.push('\n');
+
+    fs::write(&path, contents).unwrap_or_else(|e| {
+        panic!("kobu: failed to write {}: {e}", path.display());
+    });
 }
