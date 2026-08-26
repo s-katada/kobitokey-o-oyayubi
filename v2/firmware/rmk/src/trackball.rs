@@ -23,7 +23,7 @@
 //! routes deterministically.
 
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicI32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
@@ -65,10 +65,13 @@ pub static SCROLL_EMITS: core::sync::atomic::AtomicU32 = core::sync::atomic::Ato
 //
 // [`PointerProcessor`] pulses [`AUTO_MOUSE_ACTIVITY`] on every real (non-zero)
 // pointer motion. [`run_auto_mouse_layer`] (spawned from `src/central.rs`)
-// activates [`AUTO_MOUSE_LAYER`] on the first motion and deactivates it once no
-// motion has arrived for [`AUTO_MOUSE_TIMEOUT`]. Scroll (the LEFT ball) does
-// NOT trigger it — you scroll on the base layer while typing, so hijacking the
-// layer on scroll would be surprising.
+// activates [`AUTO_MOUSE_LAYER`] on the first motion and holds it UNBOUNDED
+// while the hand is resting/mousing — deactivation happens only on typing
+// resume (the instant typing-kill) or once a CLICK completes and neither a
+// follow-up press nor ball motion arrives within [`AUTO_MOUSE_CLICK_GRACE`]
+// (the click-ends-the-session rule; see the hold branch). Scroll (the LEFT
+// ball) does NOT trigger it — you scroll on the base layer while typing, so
+// hijacking the layer on scroll would be surprising.
 
 /// Pulsed on each non-zero peripheral pointer-motion event. Latching `Signal`,
 /// so a pulse raised while [`run_auto_mouse_layer`] is mid-iteration is
@@ -79,11 +82,12 @@ static AUTO_MOUSE_ACTIVITY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 /// Pulsed on every EMITTED pointer report (real cursor motion), including
 /// slow/small mousing where the raw sensor sample was sub-count (x=y=0) and so
 /// never pulsed [`AUTO_MOUSE_ACTIVITY`] — yet `pend_*` still periodically crosses
-/// a full count and emits a report, so the cursor visibly moves. The auto-mouse
-/// HOLD branch waits on EITHER signal, so layer 4 stays active while you keep
-/// mousing slowly instead of dropping after [`AUTO_MOUSE_TIMEOUT`] of zero-delta
-/// samples (the "マウスは動くのにレイヤーが消える" bug). It feeds the HOLD only,
-/// never ACTIVATION, so it can't switch layer 4 on during typing.
+/// a full count and emits a report, so the cursor visibly moves. Historically
+/// the HOLD branch's idle timer was re-armed by EITHER signal (the "マウスは動く
+/// のにレイヤーが消える" fix); with the idle timeout now removed the hold branch
+/// only DRAINS both signals so a stale latched pulse can't instantly re-activate
+/// the layer right after the typing-kill. It feeds the HOLD only, never
+/// ACTIVATION, so it can't switch layer 4 on during typing.
 static AUTO_MOUSE_KEEPALIVE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// Gross pointer travel (Σ|dx|+|dy| in raw 800-CPI counts) banked by
@@ -95,52 +99,95 @@ static AUTO_MOUSE_KEEPALIVE: Signal<CriticalSectionRawMutex, ()> = Signal::new()
 static AUTO_MOUSE_TRAVEL: AtomicI32 = AtomicI32::new(0);
 
 /// Layer activated while the pointer is moving. Matches keyboard.toml layer 4
-/// (the mouse layer). `NUM_LAYER` is 7, so this is always in range; if it ever
+/// (the mouse layer). `NUM_LAYER` is 8, so this is always in range; if it ever
 /// isn't, `activate_layer` warns and no-ops rather than panicking.
 const AUTO_MOUSE_LAYER: u8 = 4;
 
-/// Idle hold window: how long the mouse layer survives with NO motion, NO click
-/// and NO held button. History: 250 → 700 → 500 → 250 → 400 → 150 → 600 ms.
-///
-/// 150 ms (the "結構ガクッと短く" request) turned out to be SHORTER than the
-/// human stop→aim→move-finger-to-the-button gap (~200–400 ms): the layer kept
-/// dropping exactly between "pointer settled on target" and "finger reaches the
-/// MouseBtn key", so the click typed a base-layer key instead ("静止するために
-/// 微調整しているとオートマウスレイヤーが切れちゃってクリックできない"). The
-/// old warning on this constant predicted precisely that failure.
-///
-/// Back up to 600 ms — wide enough for stop→aim→click including hesitation. The
-/// fast return-to-typing that 150 ms existed FOR is now provided by the INSTANT
-/// typing-kill in the hold loop (a non-modifier key press that falls through a
-/// transparent layer-4 slot drops the layer within one ≤25 ms poll, see
-/// `build.rs::patch_rmk_typing_tick`), so this window no longer needs to be
-/// typing-friendly — only click-friendly. Clicks (button edges) and held
-/// buttons re-arm it, so double-click chains and drags are timeout-free.
-///
-/// 600 → 400 → 300 ms (2026-06-12 #2, user: 「ちょっと有効時間が長い」, then
-/// picked 300): the instant typing-kill only covers keys that fall through
-/// TRANSPARENT layer-4 slots — the dense layer-4 positions (mouse buttons on
-/// Y/U/I/O, Cmd+C/V, Tab/LGui…) execute their layer-4 function instead, so
-/// the idle window is the ONLY bound on "typed y/u/i/o right after mousing
-/// becomes a stray click". 300 ms sits just above the fast end of the human
-/// stop→aim→click gap (~200-400 ms) — the 150 ms era broke clicking outright,
-/// so treat 300 as the floor; if clicks start missing, go back to 400.
-const AUTO_MOUSE_TIMEOUT: Duration = Duration::from_millis(300);
+/// True while [`run_auto_mouse_layer`] holds the mouse layer active. Read by
+/// `src/status_led.rs`: rmk's `ControllerEvent::Layer` only carries the
+/// HIGHEST active layer, so while the Linux toggle layer (7) is latched every
+/// event reads "7" and the LED would mask the purple mouse indication without
+/// this side channel (2026-08-26, 「winとlinuxモードのledの色がおかしい」fix).
+pub static AUTO_MOUSE_LED_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+// Idle hold window — REMOVED (2026-08-26). History of the constant
+// (AUTO_MOUSE_TIMEOUT): 250 → 700 → 500 → 250 → 400 → 150 → 600 → 400 →
+// 300 ms → gone. The user's final call: 「(右トラボに)おいただけでも常にオート
+// マウスレイヤーになるようにしたい」 — but a PMW3610 images the BALL, not the
+// finger, so a resting still finger produces zero counts and is
+// indistinguishable from "nobody touching". No idle window can express "while
+// touched"; every value we tried either dropped the layer mid-rest (the
+// complaint) or lingered too long after real mousing (the 600 ms era's
+// 「ちょっと有効時間が長い」). So the hold is now UNBOUNDED and the layer drops
+// ONLY on the instant typing-kill (a non-modifier key press falling through a
+// transparent layer-4 slot, ≤1 poll, see `build.rs::patch_rmk_typing_tick`).
+//
+// Accepted trade-offs (user chose this knowingly, 2026-08-26):
+//   * With AUTO_MOUSE_TRAVEL_THRESHOLD = 1, a single sensor-noise count now
+//     leaves the purple LED on until the next keystroke or click instead of
+//     300 ms. If that shows up, raise the threshold to 3–5 (do NOT re-add a
+//     timeout).
+//
+// 2026-08-26 #2 (same day, 「検索フォームをクリックしてyから始まる文字を打とうと
+// すると死ぬ？」— yes it did): the unbounded hold left the RIGHT alpha block a
+// minefield after a click — Y/U/I/O are MouseBtn1/2/2/3 and H/J/K/L,N/M/,/. are
+// `No` on layer 4, so "click the form, type a right-hand-initial word" produced
+// stray clicks / dead keys until some LEFT-hand key finally typing-killed the
+// layer. The 300 ms idle window used to bound that hole to 0.3 s; unbounded
+// made it permanent. Fix: the CLICK-ENDS-THE-SESSION rule (user spec: 「クリック
+// や右クリックが発動したら切れる」) — a completed click means the aim-and-shoot
+// is done, so the layer drops AUTO_MOUSE_CLICK_GRACE after the release unless a
+// follow-up press (double-click) or ball motion (keep mousing) cancels it. The
+// pure resting hold (no click) remains unbounded.
 
 /// Poll cadence of the ACTIVE hold loop. Bounds the worst-case latency of the
-/// typing-kill and of click-edge detection. 25 ms is far below the ~80 ms+ gap
+/// typing-kill (the only deactivation path). 25 ms is far below the ~80 ms+ gap
 /// between two intentional keystrokes (so the SECOND keystroke of resumed
 /// typing always lands post-kill, on the base layer), and the loop only runs
 /// while the mouse layer is up, so the extra wakeups cost nothing in practice.
 const AUTO_MOUSE_HOLD_POLL: Duration = Duration::from_millis(25);
+
+/// Click-release grace: once ALL mouse buttons are released, the layer drops
+/// after this long unless a follow-up button press (double/triple-click chain)
+/// or ball motion (still mousing) arrives first — either cancels the countdown
+/// and the hold returns to unbounded.
+///
+/// This window is the ONLY thing that can distinguish "2nd tap of a
+/// double-click" from "typing y right after clicking a form" — the two are
+/// physically identical events (same key, ball still), so dropping at the
+/// press instant is impossible without killing double-click outright (the 2nd
+/// tap would always type a letter). 300 → 100 ms (2026-08-26, user: 「押した
+/// 瞬間から打てるようにはならない？…100ms後に入力できるようにしてほしい」):
+/// the user prioritises typing immediately after a click over slow
+/// double-clicks. 100 → 50 ms (2026-08-26 「50msにしましょう」), then
+/// 50 → 120 ms (2026-08-26 #2): at 50 ms double-click-to-copy failed ~60% of
+/// the time even with the PRIOR_IDLE click-drop exemption (touch-to-rearm) in
+/// place — the 2nd tap's release→press gap routinely exceeds 50 ms and a
+/// still ball banks no counts to re-activate in time. 120 ms sits inside the
+/// typical double-click gap (~80–200 ms release→press) while still letting a
+/// post-click keystroke land layer-free well before a human's click→type
+/// latency (~300 ms+). The drop actually lands 120–145 ms after release
+/// (quantised by AUTO_MOUSE_HOLD_POLL).
+const AUTO_MOUSE_CLICK_GRACE: Duration = Duration::from_millis(120);
 
 /// Require-prior-idle window (first line of defence against typing false-
 /// triggers). Suppress auto-mouse *activation* for this long after any key
 /// press (ZMK's "require-prior-idle" idea). Bumped 200 → 300 ms: at 200 ms the
 /// *tail* of a hard-keystroke trackball wobble (which keeps emitting samples)
 /// slipped through. Only gates INITIAL activation — once the mouse layer is up,
-/// AUTO_MOUSE_TIMEOUT keeps it regardless of key timing, so clicking the
-/// layer-4 mouse buttons never drops it.
+/// the unbounded hold keeps it regardless of key timing (only the typing-kill
+/// drops it), so clicking the layer-4 mouse buttons never drops it.
+///
+/// CLICK-DROP EXEMPTION (2026-08-26 #3): a mouse-button press stamps the same
+/// key tick as typing, so after the click-grace dropped the layer this window
+/// also blocked "touch the ball → purple is back → click again" for 300 ms —
+/// exactly the double-click timescale. A click is not typing, so the idle
+/// branch now BYPASSES this gate when the key tick that would block it is
+/// still the one recorded at a click-driven drop (`click_drop_keys`): no new
+/// key has been pressed since the click, so there is no typing to protect.
+/// The moment any key IS pressed after the drop the tick moves, the bypass
+/// disarms, and the full 300 ms suppression applies as before (the user's
+/// invariant: 「他のキーを強めにタイプして誤爆されなければ何をしてもよい」).
 const AUTO_MOUSE_PRIOR_IDLE: Duration = Duration::from_millis(300);
 
 /// Travel gate (the real fix, second/independent line of defence). Even after
@@ -165,9 +212,11 @@ const AUTO_MOUSE_PRIOR_IDLE: Duration = Duration::from_millis(300);
 ///
 /// ⚠️ At 1 there is NO sensor-noise margin: a single stray PMW3610 jitter count
 /// while you are NOT touching the ball (>300 ms after the last keypress) can
-/// flip layer 4 on for up to AUTO_MOUSE_TIMEOUT (400 ms). If that proves
-/// annoying (random purple LED / a mouse-layer keycode slipping out when typing
-/// resumes within that 400 ms), raise back to 3–5. Kept at 1 by request.
+/// flip layer 4 on — and with the idle timeout removed (2026-08-26) it then
+/// STAYS on until the next typing-kill keystroke, not just a few hundred ms.
+/// If that proves annoying (random persistent purple LED / a mouse-layer
+/// keycode slipping out when typing resumes), raise back to 3–5. Kept at 1 by
+/// request.
 const AUTO_MOUSE_TRAVEL_THRESHOLD: i32 = 1;
 
 /// Travel-accumulator decay window. If no motion sample arrives for this long,
@@ -261,6 +310,12 @@ pub async fn run_auto_mouse_layer<
     // travel gate. `None` while idle. Used to decay the travel accumulator
     // across quiet gaps so two unrelated wobbles can't sum into a false trigger.
     let mut last_motion: Option<u32> = None;
+    // KOBU_LAST_KEY_TICKS as sampled when the layer last dropped via the
+    // click-grace (None after a typing-kill or a reactivation). While the
+    // current key tick still equals this value, the only key press inside the
+    // PRIOR_IDLE window is the click itself → the gate is bypassed so a ball
+    // touch re-activates instantly (double-click support).
+    let mut click_drop_keys: Option<u32> = None;
     loop {
         if !active {
             // Idle: park until the next pointer-motion pulse.
@@ -285,8 +340,15 @@ pub async fn run_auto_mouse_layer<
             // ball. Re-loop instead of activating; a genuine move after a typing
             // pause still works. Reset the travel bank too so wobble counts from
             // the suppressed window don't carry into the post-window check.
-            let idle = Duration::from_ticks(now_ticks.wrapping_sub(config::last_key_ticks()) as u64);
-            if idle < AUTO_MOUSE_PRIOR_IDLE {
+            //
+            // Click-drop exemption: if the key tick that would block us is
+            // still the one recorded when the click-grace dropped the layer,
+            // no key has been pressed SINCE the click — there is no typing to
+            // protect, so let a ball touch re-activate immediately (see the
+            // AUTO_MOUSE_PRIOR_IDLE doc).
+            let key_ticks = config::last_key_ticks();
+            let idle = Duration::from_ticks(now_ticks.wrapping_sub(key_ticks) as u64);
+            if idle < AUTO_MOUSE_PRIOR_IDLE && click_drop_keys != Some(key_ticks) {
                 AUTO_MOUSE_TRAVEL.store(0, Ordering::Relaxed);
                 continue;
             }
@@ -310,42 +372,43 @@ pub async fn run_auto_mouse_layer<
             if let Ok(mut km) = keymap.try_borrow_mut() {
                 km.activate_layer(AUTO_MOUSE_LAYER);
                 active = true;
+                AUTO_MOUSE_LED_ACTIVE.store(true, Ordering::Relaxed);
                 AUTO_MOUSE_TRAVEL.store(0, Ordering::Relaxed);
                 last_motion = None;
+                click_drop_keys = None;
             }
         } else {
-            // Active: the hold is CONTEXT-aware, not a bare idle timer (the
-            // クリック救済 redesign). Poll every AUTO_MOUSE_HOLD_POLL; the layer
-            // stays up while ANY of these holds:
+            // Active: the resting/mousing hold is UNBOUNDED (2026-08-26,
+            // 「置いただけでも常にオートマウスレイヤーになるようにしたい」 —
+            // see the removed-idle-window comment above for why no timeout can
+            // express "while the finger rests on the ball"). The layer drops
+            // on exactly two events:
             //
-            //   1. motion — raw (ACTIVITY) or emitted (KEEPALIVE) — arrived
-            //      within AUTO_MOUSE_TIMEOUT (as before; the travel gate is
-            //      intentionally NOT re-checked — once mousing, even a tiny aim
-            //      nudge holds the layer);
-            //   2. a mouse button is HELD: a drag/text-selection in progress
-            //      must NEVER lose the layer, however long it lasts;
-            //   3. a mouse-button EDGE (press or release = a click) was seen
-            //      this poll: clicking proves mousing intent, so every click
-            //      re-arms the full window — double/triple-click chains and
-            //      "click, think, click again" survive gaps > the timeout.
+            //   1. TYPING resumes: a key press that resolved through a
+            //      transparent layer-4 slot to a lower layer — and is not a
+            //      bare modifier — stamps KOBU_LAST_TYPING_TICKS
+            //      (build.rs::patch_rmk_typing_tick); we kill within one
+            //      ≤AUTO_MOUSE_HOLD_POLL poll. Keys DEFINED on layer 4
+            //      (MouseBtn*) resolve AT layer 4 and never stamp, and bare
+            //      modifiers never stamp, so Shift/Cmd+click chords don't
+            //      kill.
+            //   2. A CLICK completes (2026-08-26 #2, click-ends-the-session):
+            //      when the last mouse button RELEASES, a grace countdown of
+            //      AUTO_MOUSE_CLICK_GRACE starts; if it expires the layer
+            //      drops. A follow-up press (double/triple-click chain) or
+            //      ball motion (still mousing) cancels the countdown and the
+            //      hold returns to unbounded. A held button (drag) can never
+            //      time out — the countdown only starts at release.
             //
-            // …and drops INSTANTLY (≤1 poll) when the user resumes TYPING: a
-            // key press that resolved through a transparent layer-4 slot to a
-            // lower layer — and is not a bare modifier — stamps
-            // KOBU_LAST_TYPING_TICKS (build.rs::patch_rmk_typing_tick). Keys
-            // DEFINED on layer 4 (MouseBtn*, the Cmd+C/V / Tab / held-LGui
-            // mousing chords) resolve AT layer 4 and never stamp, and bare
-            // modifiers anywhere never stamp, so Shift/Cmd+click and
-            // copy/paste-while-mousing don't kill the layer. This instant kill
-            // is what lets AUTO_MOUSE_TIMEOUT be a click-friendly 600 ms
-            // without re-introducing the mousing→typing linger that the old
-            // 150 ms existed to prevent. (KEEPALIVE covers slow/small mousing
-            // whose raw samples are sub-count yet still move the cursor via
-            // the pend_* carry — the "マウスは動くのにレイヤーが消える" fix.)
-            let mut deadline = Instant::now() + AUTO_MOUSE_TIMEOUT;
-            let mut prev_buttons = config::mouse_buttons();
+            // We wait on ACTIVITY/KEEPALIVE (with a poll timeout) both to see
+            // motion for the grace-cancel and to DRAIN the latching signals:
+            // a stale pulse latched mid-hold would otherwise make the idle
+            // branch's wait() fire immediately after a kill and re-judge
+            // phantom motion.
             let mut typing_seen = config::last_typing_ticks();
-            let mut keys_seen = config::last_key_ticks();
+            let mut prev_buttons = config::mouse_buttons();
+            // Some(deadline) while a click-release grace countdown is live.
+            let mut click_deadline: Option<Instant> = None;
             loop {
                 let keep_alive = async {
                     ::rmk::embassy_futures::select::select(
@@ -357,18 +420,22 @@ pub async fn run_auto_mouse_layer<
                 let moved = with_timeout(AUTO_MOUSE_HOLD_POLL, keep_alive).await.is_ok();
                 let now = Instant::now();
                 if moved {
-                    deadline = now + AUTO_MOUSE_TIMEOUT;
+                    // Ball moving again — still mousing; back to the
+                    // unbounded hold.
+                    click_deadline = None;
                 }
                 let buttons = config::mouse_buttons();
                 if buttons != prev_buttons {
-                    // Press or release edge — a click. Re-arm the window.
                     prev_buttons = buttons;
-                    deadline = now + AUTO_MOUSE_TIMEOUT;
-                }
-                if buttons != 0 {
-                    // Held — drag in progress. Never time out under a held
-                    // button; the release edge above re-arms a fresh window.
-                    deadline = now + AUTO_MOUSE_TIMEOUT;
+                    if buttons == 0 {
+                        // Release edge, no button left down — the click
+                        // finished. Start (or restart) the grace countdown.
+                        click_deadline = Some(now + AUTO_MOUSE_CLICK_GRACE);
+                    } else {
+                        // Press edge (incl. the 2nd tap of a double-click) —
+                        // clicking is still in progress.
+                        click_deadline = None;
+                    }
                 }
                 // Typing-kill: consume the stamp even while a button is held
                 // (typing mid-drag shouldn't drop the layer NOR kill it on
@@ -376,29 +443,30 @@ pub async fn run_auto_mouse_layer<
                 let typing = config::last_typing_ticks();
                 let typed = typing != typing_seen && buttons == 0;
                 typing_seen = typing;
-                // NON-typing key press (KOBU_LAST_KEY_TICKS moved, typing stamp
-                // did not): a layer-4 key or a bare modifier — mousing context
-                // (a click, Cmd+C/V, a Shift/Cmd held for a chord-click), so it
-                // re-arms the window. This also closes the fast-click race: a
-                // press+release BOTH inside one poll slice leaves mouse_buttons
-                // reading 0==prev (the edge branch above misses it), but the
-                // press still bumped the key tick the instant it was processed,
-                // so the click reliably refreshes the hold either way.
-                let keys = config::last_key_ticks();
-                if keys != keys_seen {
-                    keys_seen = keys;
-                    if !typed {
-                        deadline = now + AUTO_MOUSE_TIMEOUT;
-                    }
-                }
-                if typed || now >= deadline {
+                let click_done = click_deadline.is_some_and(|d| now >= d);
+                if typed || click_done {
                     if let Ok(mut km) = keymap.try_borrow_mut() {
                         km.deactivate_layer(AUTO_MOUSE_LAYER);
                         active = false;
+                        AUTO_MOUSE_LED_ACTIVE.store(false, Ordering::Relaxed);
                         AUTO_MOUSE_TRAVEL.store(0, Ordering::Relaxed);
+                        // Arm the PRIOR_IDLE click-drop exemption only for a
+                        // click-driven drop; a typing-kill means the user is
+                        // typing and must keep the full suppression.
+                        click_drop_keys = if typed {
+                            None
+                        } else {
+                            Some(config::last_key_ticks())
+                        };
                         break;
                     }
-                    // RefCell momentarily busy — stay active, retry next poll.
+                    // RefCell momentarily busy — stay active and retry the
+                    // kill next poll. An expired click_deadline stays expired
+                    // on its own; the typing stamp was already consumed, so
+                    // rewind it one tick to keep `typed` armed for the retry.
+                    if typed {
+                        typing_seen = typing.wrapping_sub(1);
+                    }
                 }
             }
         }
