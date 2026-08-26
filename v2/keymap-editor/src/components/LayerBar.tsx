@@ -7,7 +7,7 @@
  * at handshake, we never assume 7.
  */
 
-const LAYER_NAMES = ['Mac', 'Win/Linux', '数字', '設定', 'マウス', 'Emacs', 'Neovim'] as const;
+const LAYER_NAMES = ['Mac', 'Win', '数字', '設定', 'マウス', 'Emacs', 'Neovim', 'Linux'] as const;
 
 export function layerName(index: number): string {
   return LAYER_NAMES[index] ?? `レイヤー ${index}`;

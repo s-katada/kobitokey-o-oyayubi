@@ -65,12 +65,14 @@ enum Color {
 /// Base layer 0 is never passed here (it maps to off in `target_color`).
 fn layer_color(layer: u8) -> Color {
     match layer {
-        1 => Color::Blue,   // Win/Linux overlay
+        1 => Color::Blue,   // Win overlay
         2 => Color::Green,  // numbers / symbols
         3 => Color::Cyan,   // settings / media / BLE
         4 => Color::Purple, // mouse (auto-mouse layer)
         5 => Color::Yellow, // Emacs
         6 => Color::White,  // Neovim
+        // 7 (Linux) never reaches here — `target_color` maps it to dark /
+        // mouse-purple BEFORE the lookup (see the layer-indicator branch).
         _ => Color::White,  // any future layer
     }
 }
@@ -266,8 +268,29 @@ impl<'d> StatusLedController<'d> {
         // `split_connected` stays tracked for the led-red-only fallback.
         // Layer indicator: lights in the layer's color while a NON-base layer
         // is active (including auto-mouse purple).
-        if self.layer != 0 {
-            return layer_color(self.layer);
+        //
+        // Linux (layer 7) is a quiet base-like mode, NOT an indicator state
+        // (2026-08-26): rmk's Layer event carries only the HIGHEST active
+        // layer, so a latched 7 would otherwise paint solid blue forever and
+        // mask every other layer color (the 「winとlinuxモードのledの色が
+        // おかしい」 report). While 7 is the reported top layer the LED goes
+        // dark like the Mac base — except the auto-mouse purple, which is
+        // recovered via the trackball task's side-channel flag (an
+        // activate/deactivate of layer 4 still fires a Layer(7) event, so
+        // repaints happen at the right moments). Trade-off, accepted: the
+        // momentary number/settings layer colors don't show while Linux is
+        // toggled (7 outranks 2/3 in the event), only purple does.
+        let layer = if self.layer == 7 {
+            if crate::trackball::AUTO_MOUSE_LED_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
+                4
+            } else {
+                0
+            }
+        } else {
+            self.layer
+        };
+        if layer != 0 {
+            return layer_color(layer);
         }
         // Steady state: dark (2026-08-14 user spec — no continuous glow; the
         // PC link announces itself with the 1 s flash above, the right half

@@ -90,7 +90,7 @@ usb_enable = true
 [layout]
 rows = 4
 cols = 10
-layers = 7
+layers = 8
 # 40-key 4×10 split — v2's bottom pinky keys (LShift/RShift) fill (3,0) and
 # (3,9), which were phantom slots on v1. Keymap otherwise ported
 # position-by-position from KobitoKey_QWERTY (ZMK source-of-truth) — see
@@ -130,7 +130,10 @@ keymap = [
         # cross-layer alignment is wanted.
         ["LShift", "LGui", "LCtrl", "MT(Language2, LShift, FH)", "Backspace", "Backspace", "MT(Escape, LAlt, FH)", "LT(2, Space, LTP)", "LT(3, Enter, LTP)", "RShift"],
     ],
-    # Layer 1 — Win/Linux overlay (ZMK layer1)
+    # Layer 1 — Win overlay (ZMK layer1). Was "Win/Linux" until 2026-08-26:
+    # Linux got its own layer 7 — a MINIMAL overlay (Mac base + the Ctrl+H →
+    # Backspace fork on H only), NOT a copy of this layer; the user runs the
+    # Mac arrangement on Arch and only wanted the readline Ctrl+H.
     [
         ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
         ["_", "_", "_", "_", "_", "_", "_", "_", "_", "MT(Semicolon, LCtrl|LShift, FH)"],
@@ -156,7 +159,9 @@ keymap = [
     [
         ["User0", "User1", "User2", "User3", "No", "MediaPrevTrack", "MediaPlayPause", "MediaNextTrack", "AudioVolDown", "AudioVolUp"],
         ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"],
-        ["TO(0)", "TG(1)", "No", "No", "User6", "F11", "F12", "F13", "No", "_"],
+        # (2,1) TG(1) = Win toggle; (2,2) TG(7) = Linux toggle (2026-08-26,
+        # placed 「win/linuxの右横」 per the user; was `No`).
+        ["TO(0)", "TG(1)", "TG(7)", "No", "User6", "F11", "F12", "F13", "No", "_"],
         ["_", "_", "_", "_", "_", "Delete", "_", "_", "_", "_"],
     ],
     # Layer 4 — mouse (ZMK layer4; trackball motion is separate). Per the
@@ -172,10 +177,19 @@ keymap = [
     # Removed when the left hand went transparent: the old Cmd+[ / Cmd+] tab-
     # nav, TD(2) Shift, Tab + held-Cmd cmd-tab cluster, Ctrl, and Cmd+C/V.
     # TD(2) in [behavior.morse] is now unreferenced.
+    #
+    # 2026-08-26: the ZMK-verbatim `No` on H/J/K/L and N/M/,/. went transparent
+    # (user: 「クリックしてもレイヤー0に戻らないキーがある。lとか戻らないぞよ」).
+    # `No` resolves AT layer 4: it emits nothing AND never stamps the typing
+    # tick, so those eight keys were dead AND kept the auto-mouse layer alive.
+    # Transparent = fall through to the base letter + instant typing-kill, same
+    # as the left hand. Only Y/U/I/O (the mouse buttons) still resolve at
+    # layer 4. ⚠️ FLASH-STORED keymap: apply via one clearlayout flash, then
+    # the normal UF2 (see the [behavior.morse] note).
     [
         ["_", "_", "_", "_", "_", "MouseBtn1", "MouseBtn2", "MouseBtn2", "MouseBtn3", "_"],
-        ["_", "_", "_", "_", "_", "No", "No", "No", "No", "_"],
-        ["_", "_", "_", "_", "_", "No", "No", "No", "No", "_"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
         ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
     ],
     # Layer 5 — Emacs (ZMK layer5)
@@ -191,6 +205,40 @@ keymap = [
         ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
         ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
         ["_", "_", "_", "LCtrl", "_", "_", "_", "_", "_", "_"],
+    ],
+    # Layer 7 — Linux (2026-08-26). Toggled by TG(7) on layer 3, right of the
+    # Win TG(1). A MINIMAL overlay over the Mac base: every key transparent
+    # except H = TD(3), the fork token — [behavior.fork] rewrites it on EVERY
+    # press (Ctrl held → Backspace, else plain H) before morse processing
+    # runs, so the TD(3) morse itself never executes. This is how the Ctrl+H
+    # readline binding is scoped to Linux only: fork triggers match the
+    # RESOLVED KeyAction, and only this layer resolves H to TD(3).
+    #
+    # Deliberately NOT a copy of the Win layer (first attempt, same day,
+    # reverted within hours): Win's thumb overrides — MT(Backspace, LAlt) on
+    # the base-LCtrl thumb etc. — made tapping Ctrl produce Backspace
+    # (「controlを押しただけでbackspaceになります」), and the user runs the
+    # plain Mac arrangement on Arch anyway (the old Win/Linux layer was
+    # 「ちょいとイマイチ」 precisely because of those remaps). Linux mode =
+    # Mac base + Ctrl+H, nothing else.
+    #
+    # Index 7 = top of the stack, but semantically this layer ranks just above
+    # BASE: build.rs::patch_rmk_linux_layer_yield makes every layer-7 slot
+    # yield (act transparent) while ANY other non-base layer (1..=6) is
+    # active. Without that, the TD(3) H slot shadowed the H POSITION of every
+    # momentary layer — Space-layer ← (layer 2), settings F6, Emacs
+    # Backspace, and the auto-mouse transparent H (「super+tabでアプリを切り
+    # 替えるときに左矢印が効かない」, 2026-08-26). With the yield, Ctrl+H
+    # exists only in the pure "Linux + base" state, arrows/F-keys resolve on
+    # their momentary layers, and typing h while the mouse layer is up stamps
+    # the typing tick again (falls through layer 4's transparent slot). The
+    # LED side of "7 outranks everything" is handled in status_led.rs: 7
+    # renders dark, with auto-mouse purple recovered via a side channel.
+    [
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+        ["_", "_", "_", "_", "_", "TD(3)", "_", "_", "_", "_"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
+        ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"],
     ],
 ]
 
@@ -224,31 +272,59 @@ combos = [
     { actions = ["N", "M"], output = "Backspace" },                      # combo_bspc (pos 25,26)
     { actions = ["Comma", "Dot"], output = "Slash" },                    # combo_question (pos 27,28)
     { actions = ["D", "F"], output = "WM(No, LGui|LAlt)", layer = 0 },   # combo_cmd_alt (pos 12,13, Mac)
-    { actions = ["D", "F"], output = "WM(No, LCtrl|LAlt)", layer = 1 },  # combo_ctrl_alt (pos 12,13, Win/Linux)
-    { actions = ["S", "D"], output = "TG(6)", layer = 1 },               # combo_neovim_toggle (pos 11,12, Win/Linux)
+    { actions = ["D", "F"], output = "WM(No, LCtrl|LAlt)", layer = 1 },  # combo_ctrl_alt (pos 12,13, Win)
+    { actions = ["S", "D"], output = "TG(6)", layer = 1 },               # combo_neovim_toggle (pos 11,12, Win)
     { actions = ["S", "D"], output = "TG(6)", layer = 6 },               # combo_neovim_toggle (pos 11,12, Neovim → back)
+    # Layer-7 (Linux) combo (2026-08-26). Combos with a `layer` field match on
+    # the HIGHEST active layer, so the layer-0 Mac combos go silent while the
+    # Linux toggle is latched — this duplicate keeps D+F alive there. Linux is
+    # "Mac default + Ctrl+H, nothing else" (user: 「linuxモードをマックデフォ
+    # ルトのものにしてください」), so the output is the MAC spelling Cmd+Alt —
+    # an earlier Win-style Ctrl+Alt here read as 「controlとかaltの位置が変わ
+    # ってる」 and was reverted, and the S+D Neovim-toggle duplicate was
+    # dropped (the Mac layer has no S+D combo).
+    { actions = ["D", "F"], output = "WM(No, LGui|LAlt)", layer = 7 },   # combo_cmd_alt (pos 12,13, Linux = Mac behavior)
 ]
 
-# Fork — stays EMPTY. The `:` ↔ `;` inversion is now NATIVE to the firmware
-# (2026-06-12 #3): build.rs::patch_rmk_colon_native_invert renders tap = ':'
+# Fork — one entry (2026-08-26): Ctrl+H → Backspace, LINUX LAYER ONLY
+# (user: 「ctrl+hをターミナル以外でも使えるようにしたい。キーボードレベルで
+# できると嬉しい」, then 「全レイヤーに有効なやつになってるか？それだとmacで
+# 変な挙動になるので別レイヤーを作成してやってほしい」). Forks are
+# keycode-global — a transparent H resolves to the same Single(Key(H)) on
+# every layer, so a trigger of "H" cannot be layer-scoped. The scoping trick:
+# ONLY layer 7 (Linux) binds H to TD(3), and the trigger matches that unique
+# resolved action. The fork rewrites TD(3) on every press (decision made both
+# ways), so the morse never executes: Ctrl held → plain Backspace (the matched
+# Ctrl is SUPPRESSED from the report; kept_modifiers defaults to none, so no
+# accidental Ctrl+Backspace word-delete), else plain H (normal host
+# auto-repeat). Ctrl+Shift+H passes Shift through (Shift+Backspace). Mac/Win
+# layers never resolve H to TD(3) → never fire this fork. ⚠️ FLASH-STORED like
+# the keymap: apply via one clearlayout flash, then the normal UF2.
+#
+# Historical note (previous fork use, removed 2026-06-12 #3): the `:` ↔ `;`
+# inversion is NATIVE to the firmware
+# — build.rs::patch_rmk_colon_native_invert renders tap = ':'
 # (Shift+Semicolon, atomic) and Shift-chord = ';' (plain Semicolon with the
 # held Shift masked from that one report), resolved at the press edge by
 # patch_rmk_morse_shift_chord_instant_tap. The Mac's Karabiner "Exchange
 # semicolon and colon" rule was device-scoped to EXCLUDE kobu
 # (device_unless vendor 19279 / product 16985 in karabiner.json — backup at
 # karabiner.json.bak-20260612), so kobu now behaves identically on any host.
-# NOTE: forks = [] does NOT make stale Vial-written fork slots unreachable —
-# at boot rmk fill_vec-pads this list to capacity 8 BEFORE read_forks overlays
-# stored slots per index (rmk keymap.rs:49-53,94-96; host/storage.rs:245-265),
-# so try_start_forks' is_empty() early-out is dead at runtime. Two real
-# defenses instead: (1) the patched clearlayout ritual
+# NOTE: this list does NOT control stale Vial-written fork slots — at boot rmk
+# fill_vec-pads this list to capacity 8 BEFORE read_forks overlays stored
+# slots per index (rmk keymap.rs:49-53,94-96; host/storage.rs:245-265). The
+# real defense: the patched clearlayout ritual
 # (build.rs::patch_rmk_clearlayout_resync_vial_tables) rewrites all 8 fork
-# slots (plus combos/morses/macros) from this file; (2) the keymap is
-# fork-proof by shape — no position or combo output compiles to
-# Single(Key(Semicolon)) or Single(Key(Backslash)), so even an unsynced stale
-# trigger matches nothing (KeyAction PartialEq is variant-strict).
+# slots (plus combos/morses/macros) from this file. (The old "keymap is
+# fork-proof by shape" argument applied to the Semicolon/Backslash triggers of
+# the removed forks; the Ctrl+H fork below triggers on TD(3), which only the
+# Linux layer's H position resolves to.)
 [behavior.fork]
-forks = []
+forks = [
+    # Linux-layer H (TD(3) token): Ctrl+H → plain Backspace (Ctrl masked);
+    # without Ctrl, plain H.
+    { trigger = "TD(3)", negative_output = "H", positive_output = "Backspace", match_any = "LCtrl|RCtrl" },
+]
 
 [behavior.morse]
 # Flow Tap — DISABLED (2026-06-12 #3). Its last clients were the modifier MTs
@@ -272,6 +348,12 @@ morses = [
     { tap = "WM(K, LCtrl)", double_tap = "Macro(0)" },              # TD(0) = td_kill_line
     { tap = "Home", double_tap = "WM(A, LCtrl)" },                  # TD(1) = td_home_ctla
     { tap = "WM(LeftBracket, LGui)", hold = "LShift", profile = "FH" },  # TD(2) = mt LSHFT LG(LBKT) — was layer-4 left hand, now UNUSED (left hand went transparent); kept so TD(0)/TD(1) indices don't shift
+    # TD(3) = the Linux-layer H fork token (2026-08-26). NEVER executes as a
+    # morse: [behavior.fork] rewrites it to H or Backspace on every press
+    # BEFORE morse processing (keyboard.rs try_start_forks runs first). The
+    # tap/hold = H here is a graceful-degradation shape only — if a stale
+    # storage image ever loses the fork slot, the key still types h.
+    { tap = "H", hold = "H", profile = "FH" },                      # TD(3) = linux ctrl+h fork token
     # TD(3)/TD(4) REMOVED (2026-06-12 #2, the Karabiner discovery). Root cause
     # of the :/; saga was OUTSIDE the firmware: this Mac runs Karabiner-Elements
     # "Exchange semicolon and colon" (no device filter), so the screen shows the
