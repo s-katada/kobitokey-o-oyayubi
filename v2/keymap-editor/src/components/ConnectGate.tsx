@@ -25,8 +25,8 @@ export function ConnectGate({ onDemo }: { onDemo: () => void }) {
         キーマップとトラックボールの設定を、この画面から直接編集できます。
       </p>
       <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted">
-        USB ケーブルは<span className="font-medium text-ink">左手側（セントラル）</span>に挿してください。
-        右手側は USB デバイスとして現れません — 右手のキーは、右手が左手に BLE
+        USB ケーブルは<span className="font-medium text-ink">左手側（セントラル）</span>
+        に挿してください。 右手側は USB デバイスとして現れません — 右手のキーは、右手が左手に BLE
         で繋がっていれば（接続時に右手の LED が青く光ります）この画面からテストできます。
       </p>
 
