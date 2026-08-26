@@ -281,6 +281,34 @@ fn main() {
     // must run after it); the keymap.rs anchor is pristine text. NEW registry
     // patch ⇒ one `cargo clean --release -p rmk` before the next build.
     patch_rmk_typing_tick();
+    // Linux layer yield (2026-08-26): kobu2's Linux OS layer is index 7 — the
+    // TOP of the stack — but semantically it must rank just above BASE (it
+    // only exists to give H the Ctrl+H→Backspace fork token). Without this,
+    // its H slot shadowed every momentary layer's H position while the Linux
+    // toggle was latched: Space-layer ← (layer 2 H), settings F6, Emacs
+    // Backspace, and the auto-mouse transparent H all resolved to TD(3)
+    // instead (user report: 「super+tabでアプリを切り替えるときに左矢印が
+    // 効かない」). Runtime-inert for v1 (its NUM_LAYER is 7, so layer index 7
+    // never iterates). NEW registry patch ⇒ one `cargo clean --release -p rmk`
+    // before the next build.
+    patch_rmk_linux_layer_yield();
+    // Buffered-morse-follower re-resolve (2026-08-26): follow-up to
+    // patch_rmk_linux_layer_yield — that patch only helps resolutions that
+    // happen AFTER the momentary layer latches. A follower pressed inside a
+    // tap-hold's undecided window is buffered with its action FROZEN at
+    // arrival time (keyboard.rs Buffer arm); when the hold wins by TIMEOUT,
+    // non-morse followers are repaired by fire_held_non_morse_keys' by-
+    // position re-resolve, but a follower whose stale action is itself MORSE
+    // (layer 7's H slot = TD(3) fork token, resolved before layer 2 latched)
+    // is skipped by that flush AND blocks it via the Pressed-morse early
+    // return — so the FIRST Space-layer ← after latching the Linux layer
+    // emitted the TD(3) tap 'h' (host saw Super+H, switcher didn't move);
+    // presses 2+ worked. Fix: right after a morse-timeout resolution,
+    // re-resolve still-Pressed morse followers against the now-current layer
+    // state. Gated on NUM_LAYER > 7 ⇒ compile-time inert for v1 (NUM_LAYER
+    // 7). NEW registry patch ⇒ one `cargo clean --release -p rmk` before the
+    // next build.
+    patch_rmk_morse_follower_reresolve();
 
     // Dongle topology (Prospector, 2026-08): the ONE registry hook that lets a
     // 2-peripheral dongle central tell its halves apart (rmk strips the
@@ -7239,6 +7267,196 @@ pub static KOBU_AUTO_MOUSE_LAYER: core::sync::atomic::AtomicU8 = core::sync::ato
 
     contents.push('\n');
     contents.push_str(STAMP_MARKER);
+    contents.push('\n');
+    fs::write(&path, contents).unwrap_or_else(|e| {
+        panic!("kobu: failed to write {}: {e}", path.display());
+    });
+}
+
+/// Linux-layer yield in `keymap.rs::get_action_with_layer_cache` (key branch).
+///
+/// kobu2's Linux OS layer is index 7 — the top of the layer stack — but it is
+/// semantically a BASE-adjacent overlay: all-transparent except H = TD(3),
+/// the Ctrl+H→Backspace fork token (keyboard.toml layer 7). Because rmk
+/// resolves top-down by index, a latched layer 7 intercepted the H POSITION
+/// of every lower layer: Space-layer ← (layer 2's H slot), settings F6,
+/// Emacs Backspace, and the auto-mouse layer's transparent H (which also
+/// broke the typing-tick stamp for `h`). Fix: while ANY other non-base layer
+/// (1..=6) is active, layer 7's slots are treated as transparent, so
+/// resolution falls straight through to the momentary/auto-mouse layers and
+/// the Ctrl+H fork only exists in the pure "Linux + base" state — exactly the
+/// intent. Runtime-inert for v1 and for any board whose NUM_LAYER ≤ 7 (the
+/// `layer_idx == 7` arm never iterates).
+fn patch_rmk_linux_layer_yield() {
+    const RMK_VERSION: &str = "0.8.2";
+    const MARKER: &str = "// kobu: linux-layer yield in get_action_with_layer_cache applied";
+    let Some(path) = find_rmk_file(RMK_VERSION, "src/keymap.rs") else {
+        println!(
+            "cargo:warning=kobu: could not find rmk-{RMK_VERSION} keymap.rs; linux-layer yield not applied"
+        );
+        return;
+    };
+    println!("cargo:rerun-if-changed={}", path.display());
+    let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("kobu: failed to read {}: {e}", path.display());
+    });
+    if contents.contains(MARKER) {
+        return;
+    }
+
+    let from = r#"                        // This layer is activated
+                        let action = layer[row][col];
+                        if action == KeyAction::Transparent {
+                            continue;
+                        }"#;
+    let to = r#"                        // This layer is activated
+                        let action = layer[row][col];
+                        // kobu: the Linux OS layer (keyboard.toml layer 7) must
+                        // rank just above BASE, not above the momentary /
+                        // auto-mouse layers — while any other non-base layer is
+                        // active its slots yield as if transparent, so e.g. the
+                        // Space-layer ← on the H position resolves at layer 2
+                        // instead of the layer-7 Ctrl+H fork token (see
+                        // build.rs::patch_rmk_linux_layer_yield).
+                        if layer_idx == 7
+                            && self
+                                .layer_state
+                                .iter()
+                                .enumerate()
+                                .any(|(kobu_i, kobu_s)| *kobu_s && kobu_i >= 1 && kobu_i < 7)
+                        {
+                            continue;
+                        }
+                        if action == KeyAction::Transparent {
+                            continue;
+                        }"#;
+
+    if !contents.contains(from) {
+        panic!(
+            "kobu: expected rmk-{RMK_VERSION} keymap.rs get_action_with_layer_cache activated-layer block missing in {}; \
+             upstream may have changed — update firmware/build.rs::patch_rmk_linux_layer_yield",
+            path.display()
+        );
+    }
+    contents = contents.replace(from, to);
+
+    contents.push('\n');
+    contents.push_str(MARKER);
+    contents.push('\n');
+    fs::write(&path, contents).unwrap_or_else(|e| {
+        panic!("kobu: failed to write {}: {e}", path.display());
+    });
+}
+
+/// Buffered-morse-follower re-resolve in `keyboard/morse.rs::handle_morse_timeout`.
+///
+/// Companion to `patch_rmk_linux_layer_yield`, which fixed layer-7 shadowing
+/// only for keys RESOLVED after a momentary layer latches. A follower pressed
+/// inside a tap-hold's undecided window (e.g. H within 200 ms of the held
+/// LT(2,Space,LTP), LGui down for the GNOME switcher) is buffered by the
+/// PermissiveHold decision with its `KeyAction` frozen at ARRIVAL time
+/// (keyboard.rs `KeyBehaviorDecision::Buffer` arm stores the resolved
+/// `*key_action`). At that instant `layer_state[2]` is still false, the yield
+/// gate does not fire, and H resolves at layer 7 to TD(3). When the LT's
+/// 200 ms hold timeout then latches layer 2, rmk's replay machinery repairs
+/// non-morse followers (`fire_held_non_morse_keys` re-resolves by position),
+/// but a follower whose STALE action is itself morse is structurally
+/// unreachable: the flush's `remove_if(|k| !k.action.is_morse())` skips it,
+/// and its presence trips the Pressed-morse early return so the flush never
+/// runs. The buffered TD(3) later self-resolves from its tap table
+/// (tap=H/hold=H) via tap-prediction, bypassing `try_start_forks`, and the
+/// host receives Super+H instead of Super+Left — the first press fails,
+/// presses 2+ (resolved after layer 2 latched) work.
+///
+/// Fix: immediately after a morse-timeout resolution, re-resolve every
+/// still-`Pressed` morse follower by position via
+/// `get_action_with_layer_cache` and overwrite its stored action when it
+/// changed. The press-shaped lookup also re-saves the per-position layer
+/// cache (7 → 2) so the eventual release pops the right layer. If the fresh
+/// action is non-morse (layer-2 ←), the early return no longer sees a
+/// Pressed morse key and `fire_held_non_morse_keys` flushes it in the same
+/// pass — ← is pressed at the LT timeout, exactly like any ordinary
+/// follower. A key re-resolved to non-morse that must stay buffered (another
+/// undecided morse still present) is safe: `next_buffered_key` only selects
+/// Pressed keys whose action `is_morse()`, so it cannot busy-loop nor reach
+/// `handle_morse_timeout`'s morse assert. Gated on `NUM_LAYER > 7`: v1
+/// (NUM_LAYER 7) compiles the block out entirely — byte-identical behavior.
+fn patch_rmk_morse_follower_reresolve() {
+    const RMK_VERSION: &str = "0.8.2";
+    const MARKER: &str = "// kobu: buffered-morse-follower re-resolve applied";
+    let Some(path) = find_rmk_file(RMK_VERSION, "src/keyboard/morse.rs") else {
+        println!(
+            "cargo:warning=kobu: could not find rmk-{RMK_VERSION} keyboard/morse.rs; morse-follower re-resolve not applied"
+        );
+        return;
+    };
+    println!("cargo:rerun-if-changed={}", path.display());
+    let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("kobu: failed to read {}: {e}", path.display());
+    });
+    if contents.contains(MARKER) {
+        return;
+    }
+
+    let from = r#"        // If there's still morse key in the held buffer, don't fire normal keys
+        // FIXME? is |Holding needed here?
+        if self
+            .held_buffer
+            .keys
+            .iter()
+            .any(|k| k.action.is_morse() && matches!(k.state, KeyState::Pressed(_)))
+        {
+            return; //?
+        }"#;
+    let to = r#"        // kobu: a follower buffered during a tap-hold's undecided window
+        // carries its action FROZEN at arrival time. Non-morse followers are
+        // re-resolved by position in fire_held_non_morse_keys below, but a
+        // follower whose stale action is itself MORSE (the Linux layer's H
+        // slot = TD(3) fork token, resolved before the held LT's layer
+        // latched) is skipped by that flush and blocks it via the early
+        // return below — the first Space-layer ← emitted the TD(3) tap 'h'.
+        // Re-resolve still-Pressed morse followers against the NOW-current
+        // layer state (the press-shaped lookup also re-saves the layer cache
+        // so the release pops the right layer). NUM_LAYER > 7 ⇒ v1 (7
+        // layers, no Linux layer) compiles this out (see
+        // build.rs::patch_rmk_morse_follower_reresolve).
+        if NUM_LAYER > 7 {
+            for kobu_k in self.held_buffer.keys.iter_mut() {
+                if kobu_k.action.is_morse() && matches!(kobu_k.state, KeyState::Pressed(_)) {
+                    let kobu_fresh = self.keymap.borrow_mut().get_action_with_layer_cache(kobu_k.event);
+                    if kobu_fresh != kobu_k.action {
+                        debug!(
+                            "kobu: re-resolved buffered morse follower {:?} -> {:?}",
+                            kobu_k.action, kobu_fresh
+                        );
+                        kobu_k.action = kobu_fresh;
+                    }
+                }
+            }
+        }
+
+        // If there's still morse key in the held buffer, don't fire normal keys
+        // FIXME? is |Holding needed here?
+        if self
+            .held_buffer
+            .keys
+            .iter()
+            .any(|k| k.action.is_morse() && matches!(k.state, KeyState::Pressed(_)))
+        {
+            return; //?
+        }"#;
+
+    if !contents.contains(from) {
+        panic!(
+            "kobu: expected rmk-{RMK_VERSION} keyboard/morse.rs handle_morse_timeout early-return block missing in {}; \
+             upstream may have changed — update firmware/build.rs::patch_rmk_morse_follower_reresolve",
+            path.display()
+        );
+    }
+    contents = contents.replace(from, to);
+
+    contents.push('\n');
+    contents.push_str(MARKER);
     contents.push('\n');
     fs::write(&path, contents).unwrap_or_else(|e| {
         panic!("kobu: failed to write {}: {e}", path.display());
