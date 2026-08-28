@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# kobu-flash — flash one or more UF2s to the USB-connected kobu2 central,
+# entering the bootloader over HID (no RESET double-tap) between each one.
+#
+#   ./kobu-flash a.uf2 [b.uf2 ...]
+#
+# ⚠ Requires the LEFT half (central) on a DATA-capable USB cable: the Vial
+#   raw-HID jump and the UF2 mass-storage volume both live on USB.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+JUMP="$HERE/kobu-bootloader"
+[[ -x "$JUMP" ]] || { echo "kobu-flash: build kobu-bootloader first" >&2; exit 1; }
+(( $# > 0 )) || { echo "usage: kobu-flash <file.uf2> [...]" >&2; exit 2; }
+
+for f in "$@"; do
+    [[ -f "$f" ]] || { echo "kobu-flash: no such file: $f" >&2; exit 1; }
+done
+
+# The bootloader volume is NOT reliably named XIAO-BOOT (this board mounts as
+# XIAO-SENSE), so detect by INFO_UF2.TXT instead of by name.
+find_uf2_volume() {
+    local v
+    for v in /Volumes/*; do
+        [[ -f "$v/INFO_UF2.TXT" ]] && { printf '%s\n' "$v"; return 0; }
+    done
+    return 1
+}
+
+wait_for_uf2_volume() {
+    local deadline=$((SECONDS + 30)) v
+    while (( SECONDS < deadline )); do
+        if v="$(find_uf2_volume)"; then printf '%s\n' "$v"; return 0; fi
+        sleep 0.5
+    done
+    return 1
+}
+
+wait_for_keyboard() {
+    local deadline=$((SECONDS + 45))
+    while (( SECONDS < deadline )); do
+        "$JUMP" --list 2>/dev/null | grep -qi '^USB.*Vial raw HID' && return 0
+        sleep 0.5
+    done
+    return 1
+}
+
+for f in "$@"; do
+    echo "=== $(basename "$f") ==="
+
+    if vol="$(find_uf2_volume)"; then
+        echo "  already in the bootloader: $vol"
+    else
+        echo "  waiting for the keyboard on USB..."
+        wait_for_keyboard || {
+            echo "kobu-flash: no kobu2 Vial interface on USB. Plug the LEFT half in" >&2
+            echo "            with a data cable (charge-only cables will not work)." >&2
+            exit 1
+        }
+        echo "  sending BootloaderJump..."
+        "$JUMP"
+        vol="$(wait_for_uf2_volume)" || {
+            echo "kobu-flash: the UF2 volume never appeared." >&2
+            exit 1
+        }
+        echo "  bootloader mounted: $vol"
+    fi
+
+    grep -E 'Model|Board-ID' "$vol/INFO_UF2.TXT" 2>/dev/null | sed 's/^/    /' || true
+
+    echo "  copying $(basename "$f") ($(wc -c < "$f" | tr -d " ") bytes)..."
+    # macOS always writes ._ AppleDouble sidecars onto FAT; the UF2 bootloader
+    # ignores blocks without the UF2 magic, so they are harmless. Do not expect
+    # COPYFILE_DISABLE to suppress them — measured ineffective on this Mac.
+    cp "$f" "$vol/" || true   # the volume disappears mid-write on success
+    sync
+    diskutil eject "$vol" >/dev/null 2>&1 || true
+    echo "  flashed; waiting for reboot..."
+    sleep 3
+done
+
+echo "=== done ==="
+"$JUMP" --list || true
