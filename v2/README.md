@@ -14,6 +14,22 @@
 | [`firmware/dongle/`](firmware/dongle/) | **Prospector ドングル構成**（ドングル=セントラル+ST7789 画面、左右両手=ペリフェラル）。keymap/behavior は `firmware/rmk/keyboard.toml` と要同期 |
 | [`keymap-editor/`](keymap-editor/) | kobu2 専用の Web キーマップエディタ（実機の盤面をクリックして編集 + トラックボール調整）。どちらの構成でも無改修で動く（VID/PID・Via 0xC0 セマンティクス共通）|
 
+## キーマップ
+
+![keymap](firmware/rmk/keymap/kobu.svg)
+
+8 レイヤー構成です: **Mac**（デフォルト）/ **Win** / **Linux**（Mac ベース + Ctrl+H → Backspace のみ）/ **数字**（記号・矢印）/ **設定**（BLE プロファイル・F キー・メディア・レイヤー切替）/ **マウス**（トラックボール操作で自動起動）/ **Emacs** / **Neovim**。`▽` は下位レイヤーへの透過、枠なしのセルは物理スイッチのない位置（4 行目の内側 8 個）です。
+
+盤面をまたぐ丸印は同時押し（コンボ）。コンボの出力は素のキーコードなので、Shift はホスト側で自然に効きます（`\` + Shift = `|`、`-` + Shift = `_` …）。
+
+図の元データは [`firmware/rmk/keymap/kobu.yaml`](firmware/rmk/keymap/kobu.yaml) です。`keyboard.toml` とは**自動同期されない**ので、キーマップを変えたら yaml も手で直して描き直してください（devshell が stdout にバナーを出すため `<svg` 以降だけを取ります）:
+
+```sh
+cd firmware/rmk/keymap
+nix develop ../../../..#firmware --command keymap draw kobu.yaml \
+  | sed -n '/^<svg /,$p' > kobu.svg
+```
+
 ## v1 とのファームウェア差分
 
 - 追加キーは各半分の空いていたマトリクス交点 **ROW3×COL4**（小指列ネット × 親指行ネット）に配線。GPIO 追加なし・マトリクス寸法 (4×10) 変更なしで、keymap 座標では v1 で phantom だった **(3,0) / (3,9)** に載ります。レイヤー 0 の割り当ては左=LShift / 右=RShift（他レイヤーは透過）。
