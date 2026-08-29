@@ -7153,9 +7153,19 @@ fn patch_rmk_enter_chord_press_edge() {
 ///      (Cmd+C/V, Tab, held-LGui, bracket tabs): they resolve AT the layer
 ///      (`layer_idx == auto-mouse layer`), so clicking / copy-paste / app-
 ///      switching while mousing never kills the layer;
-///    * bare modifiers anywhere (Shift/Cmd/Ctrl…): pressing Cmd in
+///    * bare modifier PRESSES anywhere (Shift/Cmd/Ctrl…): pressing Cmd in
 ///      preparation for a Cmd+click must not kill the layer either;
 ///    * encoder events (different branch, irrelevant to typing).
+///
+/// 3. `keymap.rs::get_action_with_layer_cache` (release path, 2026-08-29,
+///    「マウスレイヤーでcmd,controlを叩いても解除されない。解除されるように
+///    してほしい」): a bare-modifier RELEASE while the auto-mouse layer is
+///    active DOES stamp. The press-side exemption above exists solely so the
+///    click keys still resolve on layer 4 between Cmd-down and the click; by
+///    RELEASE time a chorded click has already ended the session through the
+///    click-grace (and mid-drag stamps are consumed without killing, see
+///    run_auto_mouse_layer), so stamping here costs the chord nothing while a
+///    bare Cmd/Ctrl (or any modifier) TAP now reliably dismisses the layer.
 fn patch_rmk_typing_tick() {
     const RMK_VERSION: &str = "0.8.2";
 
@@ -7215,15 +7225,14 @@ pub static KOBU_AUTO_MOUSE_LAYER: core::sync::atomic::AtomicU8 = core::sync::ato
     let mut contents = fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!("kobu: failed to read {}: {e}", path.display());
     });
-    if contents.contains(STAMP_MARKER) {
-        return;
-    }
+    let mut dirty = false;
 
-    let from = r#"                        // Found a valid action in the layer, cache it
+    if !contents.contains(STAMP_MARKER) {
+        let from = r#"                        // Found a valid action in the layer, cache it
                         self.save_layer_cache(event.pos, layer_idx as u8);
 
                         return action;"#;
-    let to = r#"                        // Found a valid action in the layer, cache it
+        let to = r#"                        // Found a valid action in the layer, cache it
                         self.save_layer_cache(event.pos, layer_idx as u8);
 
                         // kobu (クリック救済): if the auto-mouse layer is active
@@ -7256,21 +7265,81 @@ pub static KOBU_AUTO_MOUSE_LAYER: core::sync::atomic::AtomicU8 = core::sync::ato
 
                         return action;"#;
 
-    if !contents.contains(from) {
-        panic!(
-            "kobu: expected rmk-{RMK_VERSION} keymap.rs get_action_with_layer_cache key-branch block missing in {}; \
-             upstream may have changed — update firmware/build.rs::patch_rmk_typing_tick",
-            path.display()
-        );
-    }
-    contents = contents.replace(from, to);
+        if !contents.contains(from) {
+            panic!(
+                "kobu: expected rmk-{RMK_VERSION} keymap.rs get_action_with_layer_cache key-branch block missing in {}; \
+                 upstream may have changed — update firmware/build.rs::patch_rmk_typing_tick",
+                path.display()
+            );
+        }
+        contents = contents.replace(from, to);
 
-    contents.push('\n');
-    contents.push_str(STAMP_MARKER);
-    contents.push('\n');
-    fs::write(&path, contents).unwrap_or_else(|e| {
-        panic!("kobu: failed to write {}: {e}", path.display());
-    });
+        contents.push('\n');
+        contents.push_str(STAMP_MARKER);
+        contents.push('\n');
+        dirty = true;
+    }
+
+    // ── 3. the release-path stamp (bare-modifier tap dismisses) ────────
+    const RELEASE_STAMP_MARKER: &str =
+        "// kobu: bare-modifier release stamp in get_action_with_layer_cache applied";
+    if !contents.contains(RELEASE_STAMP_MARKER) {
+        let from = r#"        if !event.pressed {
+            // Releasing a pressed key, use cached layer and restore the cache
+            let layer = self.pop_layer_from_cache(event.pos);
+            let action = self.get_action_at(event.pos, layer as usize);
+            return action;
+        }"#;
+        let to = r#"        if !event.pressed {
+            // Releasing a pressed key, use cached layer and restore the cache
+            let layer = self.pop_layer_from_cache(event.pos);
+            let action = self.get_action_at(event.pos, layer as usize);
+            // kobu (マウスレイヤー解除): a bare-modifier TAP dismisses the
+            // auto-mouse layer. The PRESS of a bare modifier deliberately
+            // never stamps (Cmd held before a Cmd+click must keep the click
+            // keys resolving on the layer), so stamp on the RELEASE instead:
+            // by release time a chorded click has already ended the session
+            // via the click-grace, and mid-drag stamps are consumed without
+            // killing (run_auto_mouse_layer), so this costs chords nothing
+            // while a bare Cmd/Ctrl tap reliably drops the layer.
+            {
+                let kobu_aml = crate::input_device::battery::KOBU_AUTO_MOUSE_LAYER
+                    .load(core::sync::atomic::Ordering::Relaxed) as usize;
+                let kobu_bare_modifier = matches!(
+                    action,
+                    KeyAction::Single(rmk_types::action::Action::Key(k)) if k.is_modifier()
+                );
+                if kobu_aml < self.layer_state.len()
+                    && self.layer_state[kobu_aml]
+                    && kobu_bare_modifier
+                {
+                    crate::input_device::battery::KOBU_LAST_TYPING_TICKS.store(
+                        embassy_time::Instant::now().as_ticks() as u32,
+                        core::sync::atomic::Ordering::Relaxed,
+                    );
+                }
+            }
+            return action;
+        }"#;
+        if !contents.contains(from) {
+            panic!(
+                "kobu: expected rmk-{RMK_VERSION} keymap.rs get_action_with_layer_cache release block missing in {}; \
+                 upstream may have changed — update firmware/build.rs::patch_rmk_typing_tick",
+                path.display()
+            );
+        }
+        contents = contents.replace(from, to);
+        contents.push('\n');
+        contents.push_str(RELEASE_STAMP_MARKER);
+        contents.push('\n');
+        dirty = true;
+    }
+
+    if dirty {
+        fs::write(&path, contents).unwrap_or_else(|e| {
+            panic!("kobu: failed to write {}: {e}", path.display());
+        });
+    }
 }
 
 /// Linux-layer yield in `keymap.rs::get_action_with_layer_cache` (key branch).
