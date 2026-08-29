@@ -39,6 +39,16 @@
 #define VIA_REPORT_LEN      32
 #define VIA_CMD_VIAL              0xfe
 #define VIAL_DYNAMIC_ENTRY_OP     0x0d
+// Via CustomGetValue (0x08) on kobu's private channel 0xC0. ids 0x10/0x11 are
+// the read-only central/peripheral battery percents (firmware/src/config.rs +
+// keymap-editor/src/protocol/customValue.ts). The reply carries the u8 value
+// at byte 3. Reading a plausible PERIPHERAL battery over the central's USB
+// Vial HID proves the BLE split link is up (the peripheral forwards its
+// battery to the central over the split).
+#define VIA_CMD_CUSTOM_GET_VALUE  0x08
+#define KOBU_CHANNEL              0xc0
+#define KOBU_ID_CENTRAL_BATT      0x10
+#define KOBU_ID_PERIPH_BATT       0x11
 #define VIAL_GET_NUMBER_OF_ENTRIES 0x00
 #define VIAL_COMBO_GET            0x03
 
@@ -198,13 +208,53 @@ static int dump_combos(IOHIDDeviceRef dev, int count) {
     return 0;
 }
 
+// Read one kobu Custom Value (channel 0xC0). Returns the u8 at reply[3], or -1
+// on transfer failure. The central always answers its own Vial HID, so a
+// failure here means the USB link to the central, not the split.
+static int get_custom_u8(IOHIDDeviceRef dev, uint8_t id) {
+    uint8_t req[VIA_REPORT_LEN], resp[VIA_REPORT_LEN];
+    memset(req, 0, sizeof req);
+    req[0] = VIA_CMD_CUSTOM_GET_VALUE; req[1] = KOBU_CHANNEL; req[2] = id;
+    if (via_xfer(dev, req, resp) != 0) return -1;
+    return resp[3];
+}
+
+// Report the split link state as seen from the central over USB. The central
+// battery is local (always valid); the peripheral battery only becomes
+// non-zero once the peripheral has BLE-connected and forwarded it, so it
+// doubles as a "peripheral connected" probe. Exit 0 if the peripheral looks
+// connected, 2 if not (so shell callers can poll).
+static int split_status(IOHIDDeviceRef dev) {
+    IOHIDDeviceRegisterInputReportCallback(dev, g_in_buf, sizeof g_in_buf, input_cb, NULL);
+    IOHIDDeviceScheduleWithRunLoop(dev, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+
+    int c = get_custom_u8(dev, KOBU_ID_CENTRAL_BATT);
+    int p = get_custom_u8(dev, KOBU_ID_PERIPH_BATT);
+    if (c < 0 || p < 0) {
+        fprintf(stderr, "kobu-bootloader: no reply from the central's Vial HID.\n");
+        return 1;
+    }
+    printf("central battery:    %d%%\n", c);
+    printf("peripheral battery: %d%%\n", p);
+    if (p > 0 && p <= 100) {
+        printf("split link: CONNECTED (peripheral is reporting over BLE)\n");
+        return 0;
+    }
+    printf("split link: peripheral battery reads 0%% — not connected yet "
+           "(still pairing, or genuinely flat)\n");
+    return 2;
+}
+
 static void usage(void) {
     fprintf(stderr,
-        "usage: kobu-bootloader [--list] [--dump-combos [N]]\n"
+        "usage: kobu-bootloader [--list] [--dump-combos [N]] [--split-status]\n"
         "                       [--transport usb|ble|any] [--serial SUBSTR]\n"
         "\n"
         "  --list             enumerate kobu2 HID interfaces and exit\n"
         "  --dump-combos [N]  read the live combo table back and exit\n"
+        "  --split-status     read central/peripheral battery over the central's\n"
+        "                     Vial HID; a live peripheral battery proves the BLE\n"
+        "                     split link is up. Exits 0 if connected, 2 if not.\n"
         "  --transport WHICH  which transport to target (default: usb)\n"
         "  --serial SUBSTR    require the serial number to contain SUBSTR\n"
         "                     (the last 6 hex digits are the nRF FICR DEVICEID,\n"
@@ -214,6 +264,7 @@ static void usage(void) {
 int main(int argc, char **argv) {
     int do_list = 0;
     int do_dump = 0, dump_count = 0;
+    int do_split = 0;
     const char *want_transport = "usb";
     const char *want_serial = NULL;
 
@@ -223,6 +274,8 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i], "--dump-combos")) {
             do_dump = 1;
             if (i + 1 < argc && argv[i + 1][0] != '-') dump_count = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--split-status")) {
+            do_split = 1;
         } else if (!strcmp(argv[i], "--transport") && i + 1 < argc) {
             want_transport = argv[++i];
         } else if (!strcmp(argv[i], "--serial") && i + 1 < argc) {
@@ -314,6 +367,7 @@ int main(int argc, char **argv) {
     }
 
     if (do_dump) return dump_combos(target, dump_count);
+    if (do_split) return split_status(target);
 
     uint8_t report[VIA_REPORT_LEN];
     memset(report, 0, sizeof report);
