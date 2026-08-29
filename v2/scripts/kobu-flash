@@ -36,10 +36,21 @@ wait_for_uf2_volume() {
     return 1
 }
 
-wait_for_keyboard() {
-    local deadline=$((SECONDS + 45))
+# Wait for EITHER a running keyboard (Vial HID → send BootloaderJump) or a
+# bare bootloader volume, whichever shows up first. The board can come back
+# in either state between two UF2s: a normal firmware reboots into the
+# keyboard, but xiao-nuke.uf2 leaves no app at all, so the board remounts
+# straight as the bootloader with no HID to jump from.
+wait_for_bootloader() {
+    local deadline=$((SECONDS + 45)) v
     while (( SECONDS < deadline )); do
-        "$JUMP" --list 2>/dev/null | grep -qi '^USB.*Vial raw HID' && return 0
+        if v="$(find_uf2_volume)"; then printf '%s\n' "$v"; return 0; fi
+        if "$JUMP" --list 2>/dev/null | grep -qi '^USB.*Vial raw HID'; then
+            echo "  sending BootloaderJump..." >&2
+            "$JUMP" >&2 || true
+            wait_for_uf2_volume
+            return
+        fi
         sleep 0.5
     done
     return 1
@@ -51,16 +62,11 @@ for f in "$@"; do
     if vol="$(find_uf2_volume)"; then
         echo "  already in the bootloader: $vol"
     else
-        echo "  waiting for the keyboard on USB..."
-        wait_for_keyboard || {
-            echo "kobu-flash: no kobu2 Vial interface on USB. Plug the LEFT half in" >&2
-            echo "            with a data cable (charge-only cables will not work)." >&2
-            exit 1
-        }
-        echo "  sending BootloaderJump..."
-        "$JUMP"
-        vol="$(wait_for_uf2_volume)" || {
-            echo "kobu-flash: the UF2 volume never appeared." >&2
+        echo "  waiting for the keyboard or the bootloader on USB..."
+        vol="$(wait_for_bootloader)" || {
+            echo "kobu-flash: no kobu2 Vial interface and no UF2 volume on USB. Plug the" >&2
+            echo "            LEFT half in with a data cable (charge-only cables will not" >&2
+            echo "            work)." >&2
             exit 1
         }
         echo "  bootloader mounted: $vol"
