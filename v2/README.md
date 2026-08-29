@@ -65,3 +65,23 @@ UF2 は CI が [firmware-latest リリース](../../releases/tag/firmware-latest
 kobu-uf2conv target/thumbv7em-none-eabihf/release/central    kobu2-rmk-central.uf2
 kobu-uf2conv target/thumbv7em-none-eabihf/release/peripheral kobu2-rmk-peripheral.uf2
 ```
+
+## XIAO の完全消去（flash nuke）
+
+`kobu2-rmk-*-reset.uf2`（`clear_layout` ビルド）は保存済みキーマップを消すだけで、アプリ本体や BLE ボンドはそのまま残ります。XIAO を**本当にまっさら**（アプリなし・ブートローダのみ）に戻したいときは [`scripts/xiao-nuke.uf2`](scripts/xiao-nuke.uf2) を焼きます。RESET 2 連打 → ドラッグ & ドロップでも、[`scripts/kobu-flash`](scripts/kobu-flash) でも書き込めます:
+
+```sh
+# まっさらにするだけ
+scripts/kobu-flash scripts/xiao-nuke.uf2
+
+# まっさらにしてからクリーンインストール（nuke 後は自動でブートローダに
+# 留まるので、そのまま続けて焼ける）
+scripts/kobu-flash scripts/xiao-nuke.uf2 firmware/rmk/kobu2-rmk-central.uf2
+```
+
+- 消去範囲は **0x1000–0xF4000**: アプリ + RMK storage（0xA0000–0xC0000 のキーマップ・BLE ボンド・Vial 状態）+ 未使用域（過去に ZMK を焼いた個体の settings 残骸を含む）。MBR（0x0–0x1000）と Adafruit UF2 ブートローダ（0xF4000–）には触れません。
+- 実行コードを含まない「全ブロック 0xFF のデータだけ」の UF2 で、ページ消去はブートローダの書き込みパスが行います。書き込み後は先頭ワードが 0xFFFFFFFF（= 有効なアプリなし）になるため、XIAO は再起動後も自動でブートローダ（XIAO-SENSE ドライブ）に留まり、そのまま次の UF2 を受け付けます。
+- nRF52840 + Adafruit UF2 ブートローダの組み合わせなら v1 の XIAO にもそのまま使えます。
+- キーボード側のボンドは消えますが、**ホスト側（macOS 等）の Bluetooth 設定に残った古いペアリングは別途削除**してください。
+
+再生成は [`scripts/gen-xiao-nuke`](scripts/gen-xiao-nuke)（Python 3 標準ライブラリのみ、出力はバイト単位で再現可能）。CI も再生成してコミット済みファイルと一致することを検証します。
