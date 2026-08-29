@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# kobu-flash — flash one or more UF2s to the USB-connected kobu2 central,
+# entering the bootloader over HID (no RESET double-tap) between each one.
+#
+#   ./kobu-flash a.uf2 [b.uf2 ...]
+#
+# ⚠ Requires the LEFT half (central) on a DATA-capable USB cable: the Vial
+#   raw-HID jump and the UF2 mass-storage volume both live on USB.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+JUMP="$HERE/kobu-bootloader"
+[[ -x "$JUMP" ]] || { echo "kobu-flash: build kobu-bootloader first" >&2; exit 1; }
+(( $# > 0 )) || { echo "usage: kobu-flash <file.uf2> [...]" >&2; exit 2; }
+
+for f in "$@"; do
+    [[ -f "$f" ]] || { echo "kobu-flash: no such file: $f" >&2; exit 1; }
+done
+
+# The bootloader volume is NOT reliably named XIAO-BOOT (this board mounts as
+# XIAO-SENSE), so detect by INFO_UF2.TXT instead of by name.
+find_uf2_volume() {
+    local v
+    for v in /Volumes/*; do
+        [[ -f "$v/INFO_UF2.TXT" ]] && { printf '%s\n' "$v"; return 0; }
+    done
+    return 1
+}
+
+wait_for_uf2_volume() {
+    local deadline=$((SECONDS + 30)) v
+    while (( SECONDS < deadline )); do
+        if v="$(find_uf2_volume)"; then printf '%s\n' "$v"; return 0; fi
+        sleep 0.5
+    done
+    return 1
+}
+
+# Wait for EITHER a running keyboard (Vial HID → send BootloaderJump) or a
+# bare bootloader volume, whichever shows up first. The board can come back
+# in either state between two UF2s: a normal firmware reboots into the
+# keyboard, but xiao-nuke.uf2 leaves no app at all, so the board remounts
+# straight as the bootloader with no HID to jump from.
+wait_for_bootloader() {
+    local deadline=$((SECONDS + 45)) v
+    while (( SECONDS < deadline )); do
+        if v="$(find_uf2_volume)"; then printf '%s\n' "$v"; return 0; fi
+        if "$JUMP" --list 2>/dev/null | grep -qi '^USB.*Vial raw HID'; then
+            echo "  sending BootloaderJump..." >&2
+            "$JUMP" >&2 || true
+            wait_for_uf2_volume
+            return
+        fi
+        sleep 0.5
+    done
+    return 1
+}
+
+for f in "$@"; do
+    echo "=== $(basename "$f") ==="
+
+    if vol="$(find_uf2_volume)"; then
+        echo "  already in the bootloader: $vol"
+    else
+        echo "  waiting for the keyboard or the bootloader on USB..."
+        vol="$(wait_for_bootloader)" || {
+            echo "kobu-flash: no kobu2 Vial interface and no UF2 volume on USB. Plug the" >&2
+            echo "            LEFT half in with a data cable (charge-only cables will not" >&2
+            echo "            work)." >&2
+            exit 1
+        }
+        echo "  bootloader mounted: $vol"
+    fi
+
+    grep -E 'Model|Board-ID' "$vol/INFO_UF2.TXT" 2>/dev/null | sed 's/^/    /' || true
+
+    echo "  copying $(basename "$f") ($(wc -c < "$f" | tr -d " ") bytes)..."
+    # macOS always writes ._ AppleDouble sidecars onto FAT; the UF2 bootloader
+    # ignores blocks without the UF2 magic, so they are harmless. Do not expect
+    # COPYFILE_DISABLE to suppress them — measured ineffective on this Mac.
+    cp "$f" "$vol/" || true   # the volume disappears mid-write on success
+    sync || true
+
+    # The only proof the bootloader accepted the whole file is that it resets
+    # itself and the volume drops. If it is still mounted after 30 s, the
+    # write-complete never fired (seen 2026-08-29 with a UF2 whose declared
+    # block count exceeded the bootloader's 0x1000-0xEA000 write window:
+    # out-of-window blocks are ignored AND uncounted, so completion never
+    # comes) — bail out loudly instead of flashing the next file into a
+    # stale bootloader session.
+    reset_deadline=$((SECONDS + 30))
+    while [[ -f "$vol/INFO_UF2.TXT" ]]; do
+        if (( SECONDS > reset_deadline )); then
+            echo "kobu-flash: $(basename "$f") was copied but the bootloader never" >&2
+            echo "            auto-reset ($vol is still mounted). Tap RESET once and" >&2
+            echo "            check what is running before flashing anything else." >&2
+            exit 1
+        fi
+        sleep 0.5
+    done
+    echo "  device reset itself; flash accepted."
+done
+
+echo "=== done ==="
+sleep 3
+"$JUMP" --list || true

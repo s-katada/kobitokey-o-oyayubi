@@ -252,8 +252,19 @@ timeout = "50ms"
 combos = [
     { actions = ["Q", "W"], output = "Grave" },                          # combo_grave (pos 0,1)
     { actions = ["A", "S"], output = "Tab" },                            # combo_tab (pos 10,11)
-    { actions = ["Y", "U"], output = "Backspace" },                      # combo_yu_bspc (pos 5,6)
-    { actions = ["U", "I"], output = "WM(Backslash, LShift)" },          # combo_pipe (pos 6,7) — emits `|` directly (forks removed)
+    # (2026-08-28) combo_backslash (pos 6,7). Was `WM(Backslash, LShift)`, i.e.
+    # an unconditional `|`; the user asked for the INVERSE — 「通常を\ でシフトで
+    # | でお願いします」. A BARE keycode is all that is needed: the chord emits
+    # Backslash and any Shift the user is physically holding stays in the same
+    # HID report, so the host applies the US-layout shifted symbol itself —
+    # tap = `\`, Shift+tap = `|`. (This is the "Chord output uses base
+    # keycodes; Shift produces the natural shifted symbol" rule stated above;
+    # the pipe entry was the one combo that violated it.)
+    #
+    # The Y+U (pos 5,6) Backspace chord that used to sit here was REMOVED on
+    # the same request (「同時押しデリートも消してほしい」), together with the
+    # N+M one below — see that site for the rationale.
+    { actions = ["U", "I"], output = "Backslash" },                      # combo_backslash (pos 6,7) — tap `\`, Shift+tap `|`
     { actions = ["I", "O"], output = "Minus" },                          # combo_minus (pos 7,8)
     { actions = ["O", "P"], output = "Equal" },                          # combo_plus (pos 8,9)
     { actions = ["J", "K"], output = "LeftBracket" },                    # combo_lbkt (pos 16,17)
@@ -269,7 +280,11 @@ combos = [
     # combo-parking the 英数 thumb delayed that rescue by up to 50ms (the
     # Backspace landed on the NEXT keypress instead of at the thumb).
     { actions = ["L", "MT(Semicolon, LCtrl|LShift, FH)"], output = "Quote" },
-    { actions = ["N", "M"], output = "Backspace" },                      # combo_bspc (pos 25,26)
+    # (2026-08-28) combo_bspc (pos 25,26, N+M) REMOVED alongside combo_yu_bspc
+    # (pos 5,6, Y+U) — both emitted Backspace and both were prone to misfiring
+    # on fast right-hand rolls (y→u is a common romaji sequence: ゆ / しゅ /
+    # きゅ …). Nothing is lost: layer 0 binds a PLAIN Backspace to the
+    # 直下 thumb on BOTH halves, which is the primary delete gesture.
     { actions = ["Comma", "Dot"], output = "Slash" },                    # combo_question (pos 27,28)
     { actions = ["D", "F"], output = "WM(No, LGui|LAlt)", layer = 0 },   # combo_cmd_alt (pos 12,13, Mac)
     { actions = ["D", "F"], output = "WM(No, LCtrl|LAlt)", layer = 1 },  # combo_ctrl_alt (pos 12,13, Win)

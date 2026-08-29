@@ -200,6 +200,14 @@ jobs:
           sed -i 's/^clear_layout = true$/clear_layout = false/' keyboard.toml
           EOF
 
+      # Full-wipe UF2 — pure data, no compilation (stdlib Python only).
+      # Regenerate and require it to match the committed file so the
+      # generator and the checked-in artifact can never drift apart.
+      - name: Generate and verify xiao-nuke.uf2
+        run: |
+          python3 v2/scripts/gen-xiao-nuke
+          git diff --exit-code v2/scripts/xiao-nuke.uf2
+
       - name: Upload RMK v2 firmware artifact
         uses: actions/upload-artifact@v4
         with:
@@ -209,6 +217,7 @@ jobs:
             v2/firmware/rmk/kobu2-rmk-peripheral.uf2
             v2/firmware/rmk/kobu2-rmk-central-reset.uf2
             v2/firmware/rmk/kobu2-rmk-peripheral-reset.uf2
+            v2/scripts/xiao-nuke.uf2
           if-no-files-found: error
 
   # ── ZMK firmware (v1/firmware/zmk, zmk-nix) ───────────────────────────────
@@ -285,7 +294,7 @@ jobs:
           # kobu-zmk-left.uf2, …) the web editors fetch are preserved regardless
           # of the artifacts' internal directory layout.
           mapfile -t UF2S < <(find dist -name '*.uf2' | sort)
-          test "${#UF2S[@]}" -eq 11  # 4 RMK v1 + 4 RMK v2 + 3 ZMK; fail loudly if a build dropped one
+          test "${#UF2S[@]}" -eq 12  # 4 RMK v1 + 4 RMK v2 + 1 nuke + 3 ZMK; fail loudly if a build dropped one
           NOTES=$(cat <<NOTE
           自動ビルドされた最新版です（RMK v1 / RMK v2 (kobu2) / ZMK ファームウェア）。
 
@@ -313,6 +322,14 @@ jobs:
           \`kobu-zmk-left.uf2\` = 左 (central, ZMK Studio 対応) /
           \`kobu-zmk-right.uf2\` = 右 (peripheral) / \`kobu-zmk-reset.uf2\` =
           settings_reset。RMK と同じ要領で RESET 2 連打 → ドラッグ&ドロップ。
+
+          ## XIAO 完全消去（flash nuke）
+          \`xiao-nuke.uf2\` はファームウェアが書き込む全領域
+          (0x1000–0xC0000: アプリ + RMK storage) を消去済み状態に戻す
+          データだけの UF2。焼くと XIAO は本当にまっさら（アプリなし）になり、
+          再起動後も自動でブートローダに留まるので続けて任意の UF2 を焼けます。
+          v1 / v2 どちらの XIAO にも使用可。詳細は v2/README.md の
+          「XIAO の完全消去（flash nuke）」参照。
           NOTE
           )
           # Delete the previous release (and its moving tag) if present so the

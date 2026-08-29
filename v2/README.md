@@ -14,6 +14,22 @@
 | [`firmware/dongle/`](firmware/dongle/) | **Prospector ドングル構成**（ドングル=セントラル+ST7789 画面、左右両手=ペリフェラル）。keymap/behavior は `firmware/rmk/keyboard.toml` と要同期 |
 | [`keymap-editor/`](keymap-editor/) | kobu2 専用の Web キーマップエディタ（実機の盤面をクリックして編集 + トラックボール調整）。どちらの構成でも無改修で動く（VID/PID・Via 0xC0 セマンティクス共通）|
 
+## キーマップ
+
+![keymap](firmware/rmk/keymap/kobu.svg)
+
+8 レイヤー構成です: **Mac**（デフォルト）/ **Win** / **Linux**（Mac ベース + Ctrl+H → Backspace のみ）/ **数字**（記号・矢印）/ **設定**（BLE プロファイル・F キー・メディア・レイヤー切替）/ **マウス**（トラックボール操作で自動起動）/ **Emacs** / **Neovim**。`▽` は下位レイヤーへの透過、枠なしのセルは物理スイッチのない位置（4 行目の内側 8 個）です。
+
+盤面をまたぐ丸印は同時押し（コンボ）。コンボの出力は素のキーコードなので、Shift はホスト側で自然に効きます（`\` + Shift = `|`、`-` + Shift = `_` …）。
+
+図の元データは [`firmware/rmk/keymap/kobu.yaml`](firmware/rmk/keymap/kobu.yaml) です。`keyboard.toml` とは**自動同期されない**ので、キーマップを変えたら yaml も手で直して描き直してください（devshell が stdout にバナーを出すため `<svg` 以降だけを取ります）:
+
+```sh
+cd firmware/rmk/keymap
+nix develop ../../../..#firmware --command keymap draw kobu.yaml \
+  | sed -n '/^<svg /,$p' > kobu.svg
+```
+
 ## v1 とのファームウェア差分
 
 - 追加キーは各半分の空いていたマトリクス交点 **ROW3×COL4**（小指列ネット × 親指行ネット）に配線。GPIO 追加なし・マトリクス寸法 (4×10) 変更なしで、keymap 座標では v1 で phantom だった **(3,0) / (3,9)** に載ります。レイヤー 0 の割り当ては左=LShift / 右=RShift（他レイヤーは透過）。
@@ -49,3 +65,23 @@ UF2 は CI が [firmware-latest リリース](../../releases/tag/firmware-latest
 kobu-uf2conv target/thumbv7em-none-eabihf/release/central    kobu2-rmk-central.uf2
 kobu-uf2conv target/thumbv7em-none-eabihf/release/peripheral kobu2-rmk-peripheral.uf2
 ```
+
+## XIAO の完全消去（flash nuke）
+
+`kobu2-rmk-*-reset.uf2`（`clear_layout` ビルド）は保存済みキーマップを消すだけで、アプリ本体や BLE ボンドはそのまま残ります。XIAO を**本当にまっさら**（アプリなし・ブートローダのみ）に戻したいときは [`scripts/xiao-nuke.uf2`](scripts/xiao-nuke.uf2) を焼きます。RESET 2 連打 → ドラッグ & ドロップでも、[`scripts/kobu-flash`](scripts/kobu-flash) でも書き込めます:
+
+```sh
+# まっさらにするだけ
+scripts/kobu-flash scripts/xiao-nuke.uf2
+
+# まっさらにしてからクリーンインストール（nuke 後は自動でブートローダに
+# 留まるので、そのまま続けて焼ける）
+scripts/kobu-flash scripts/xiao-nuke.uf2 firmware/rmk/kobu2-rmk-central.uf2
+```
+
+- 消去範囲は **0x1000–0xC0000**: アプリ + RMK storage（0xA0000–0xC0000 のキーマップ・BLE ボンド・Vial 状態）で、ファームウェアが書き込む領域のすべて。MBR（0x0–0x1000）と Adafruit UF2 ブートローダ（0xF4000–）には触れません。終端を 0xC0000 で止めるのは、出荷版ブートローダ (0.6.1) の UF2 書き込みウィンドウが実測 0x1000–0xEA000 で、ウィンドウ外のブロックは受領カウントされず「全ブロック受領 → 自動リセット」が発火しなくなるため（0xF4000 終端で実害を確認済み。フラッシュ自体は書けるが物理 RESET が必要になる）。なお過去に ZMK を焼いた個体の settings（0xEA000 以降）は UF2 経由では消せないので、必要なら SWD で。
+- 実行コードを含まない「全ブロック 0xFF のデータだけ」の UF2 で、ページ消去はブートローダの書き込みパスが行います。書き込み後は先頭ワードが 0xFFFFFFFF（= 有効なアプリなし）になるため、XIAO は再起動後も自動でブートローダ（XIAO-SENSE ドライブ）に留まり、そのまま次の UF2 を受け付けます。
+- nRF52840 + Adafruit UF2 ブートローダの組み合わせなら v1 の XIAO にもそのまま使えます。
+- キーボード側のボンドは消えますが、**ホスト側（macOS 等）の Bluetooth 設定に残った古いペアリングは別途削除**してください。
+
+再生成は [`scripts/gen-xiao-nuke`](scripts/gen-xiao-nuke)（Python 3 標準ライブラリのみ、出力はバイト単位で再現可能）。CI も再生成してコミット済みファイルと一致することを検証します。

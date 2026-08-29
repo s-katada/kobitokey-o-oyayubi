@@ -104,15 +104,16 @@ timeout = "50ms"
 combos = [
     { actions = ["Q", "W"], output = "Grave" },
     { actions = ["A", "S"], output = "Tab" },
-    { actions = ["Y", "U"], output = "Backspace" },
-    { actions = ["U", "I"], output = "WM(Backslash, LShift)" },
+    # (2026-08-28) kept in sync with ../rmk/keyboard.toml: the pipe chord is now
+    # a BARE Backslash (tap `\`, Shift+tap `|`), and both Backspace chords
+    # (Y+U here, N+M below) were removed at the user's request.
+    { actions = ["U", "I"], output = "Backslash" },
     { actions = ["I", "O"], output = "Minus" },
     { actions = ["O", "P"], output = "Equal" },
     { actions = ["J", "K"], output = "LeftBracket" },
     { actions = ["K", "L"], output = "RightBracket" },
     { actions = ["L", "MT(Semicolon, LGui|LShift, FH)"], output = "Quote" },
     { actions = ["L", "MT(Semicolon, LCtrl|LShift, FH)"], output = "Quote" },
-    { actions = ["N", "M"], output = "Backspace" },
     { actions = ["Comma", "Dot"], output = "Slash" },
     { actions = ["D", "F"], output = "WM(No, LGui|LAlt)", layer = 0 },
     { actions = ["D", "F"], output = "WM(No, LCtrl|LAlt)", layer = 1 },
