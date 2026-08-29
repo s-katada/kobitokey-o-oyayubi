@@ -389,9 +389,13 @@ pub async fn run_auto_mouse_layer<
             //      bare modifier — stamps KOBU_LAST_TYPING_TICKS
             //      (build.rs::patch_rmk_typing_tick); we kill within one
             //      ≤AUTO_MOUSE_HOLD_POLL poll. Keys DEFINED on layer 4
-            //      (MouseBtn*) resolve AT layer 4 and never stamp, and bare
-            //      modifiers never stamp, so Shift/Cmd+click chords don't
-            //      kill.
+            //      (MouseBtn*) resolve AT layer 4 and never stamp. Bare
+            //      modifier PRESSES never stamp — but their RELEASES do
+            //      (2026-08-29, 「cmd,controlを叩いたら解除」): a bare
+            //      Cmd/Ctrl TAP dismisses the layer, while a hold-then-click
+            //      chord stays safe because the click keys resolve on layer 4
+            //      throughout the hold and the click itself already ends the
+            //      session via the grace below.
             //   2. A CLICK completes (2026-08-26 #2, click-ends-the-session):
             //      when the last mouse button RELEASES, a grace countdown of
             //      AUTO_MOUSE_CLICK_GRACE starts; if it expires the layer

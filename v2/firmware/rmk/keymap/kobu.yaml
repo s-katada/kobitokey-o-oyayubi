@@ -18,7 +18,7 @@ layers:
     - [Q, W, E, R, T, Y, U, I, O, P]
     - [A, S, D, F, G, H, J, K, L, {t: ':', h: Cmd+Shift, s: ';'}]
     - [Z, X, C, V, B, N, M, ',', ., {t: '/', h: Cmd+Ctrl, s: '?'}]
-    - [Shift, Cmd, Ctrl, {t: 英数, h: Shift}, BS, BS, {t: Esc, h: Alt}, {t: Space, h: 数字}, {t: Enter, h: 設定}, Shift]
+    - [{t: Mission Ctrl}, Cmd, Ctrl, {t: 英数, h: Shift}, BS, BS, {t: Esc, h: Alt}, {t: Space, h: 数字}, {t: Enter, h: 設定}, Shift]
   Win:
     - [{t: ▽, type: trans}, {t: ▽, type: trans}, {t: ▽, type: trans}, {t: ▽, type: trans}, {t: ▽, type: trans},
        {t: ▽, type: trans}, {t: ▽, type: trans}, {t: ▽, type: trans}, {t: ▽, type: trans}, {t: ▽, type: trans}]

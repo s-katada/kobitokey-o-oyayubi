@@ -114,8 +114,12 @@ keymap = [
         # XIAO直下 (innermost) and col 1 = /COL3 = outer edge; RIGHT cols are
         # natural so col 5 = /COL0 = 直下 and col 8 = /COL3 = outer edge. cols 0
         # and 9 are the v2 bottom pinky keys (/ROW3 x /COL4 on the main unit,
-        # the 4th key at the bottom of each pinky column): plain LShift /
-        # RShift. Per the user request the whole thumb cluster was shifted
+        # the 4th key at the bottom of each pinky column): LEFT = MissionControl
+        # (2026-08-29 per user request, was plain LShift — Consumer 0x29F "AC
+        # Desktop Show All Windows", the same usage Apple keyboards send for F3,
+        # so macOS opens Mission Control natively with no shortcut config;
+        # other layers are transparent here so it falls through everywhere) /
+        # RIGHT = plain RShift. Per the user request the whole thumb cluster was shifted
         # OUTWARD on both halves and the 直下 key on each half is now plain
         # Backspace (previously the OUTER edge was Backspace):
         #   LEFT  (XIAO直下 → 外側): BS, 英数/Shift, Ctrl, BS/Cmd
@@ -128,7 +132,7 @@ keymap = [
         # Win/Linux modifiers) still sit at their old columns and so no longer
         # line up with these shifted base-layer thumbs — shift them too if that
         # cross-layer alignment is wanted.
-        ["LShift", "LGui", "LCtrl", "MT(Language2, LShift, FH)", "Backspace", "Backspace", "MT(Escape, LAlt, FH)", "LT(2, Space, LTP)", "LT(3, Enter, LTP)", "RShift"],
+        ["MissionControl", "LGui", "LCtrl", "MT(Language2, LShift, FH)", "Backspace", "Backspace", "MT(Escape, LAlt, FH)", "LT(2, Space, LTP)", "LT(3, Enter, LTP)", "RShift"],
     ],
     # Layer 1 — Win overlay (ZMK layer1). Was "Win/Linux" until 2026-08-26:
     # Linux got its own layer 7 — a MINIMAL overlay (Mac base + the Ctrl+H →

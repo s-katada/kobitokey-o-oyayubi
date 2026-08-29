@@ -49,6 +49,13 @@
 #define KOBU_CHANNEL              0xc0
 #define KOBU_ID_CENTRAL_BATT      0x10
 #define KOBU_ID_PERIPH_BATT       0x11
+// Via DynamicKeymapGetKeyCode: request [0x04, layer, row, col]; the reply
+// echoes the request and carries the via keycode u16 BIG-endian at bytes 4..5
+// (rmk-0.8.2 host/via/mod.rs:173 — note the endianness differs from the
+// little-endian Vial combo replies). Reads the LIVE keymap (compiled default
+// overlaid with the flash-stored table), so it verifies what a position
+// actually does after a reflash / clearlayout ritual.
+#define VIA_CMD_GET_KEYCODE       0x04
 #define VIAL_GET_NUMBER_OF_ENTRIES 0x00
 #define VIAL_COMBO_GET            0x03
 
@@ -126,6 +133,15 @@ static const char *hid_usage_name(unsigned u) {
         case 0x37: return "Dot";
         case 0x38: return "Slash";
         case 0x4c: return "Delete";
+        // Not HID usages — rmk/via keycodes that reach here through
+        // keycode_str's low-byte path (consumer keys the keymap can hold).
+        case 0xc1: return "MissionControl";
+        case 0xc2: return "Launchpad";
+        case 0xe1: return "LShift";
+        case 0xe0: return "LCtrl";
+        case 0xe2: return "LAlt";
+        case 0xe3: return "LGui";
+        case 0xe5: return "RShift";
     }
     snprintf(buf, sizeof buf, "%#04x", u);
     return buf;
@@ -245,13 +261,39 @@ static int split_status(IOHIDDeviceRef dev) {
     return 2;
 }
 
+// Read one live keymap position over Via DynamicKeymapGetKeyCode. Prints the
+// via keycode plus a best-effort name so a reflash can be verified without
+// physically pressing the key.
+static int get_key(IOHIDDeviceRef dev, int layer, int row, int col) {
+    IOHIDDeviceRegisterInputReportCallback(dev, g_in_buf, sizeof g_in_buf, input_cb, NULL);
+    IOHIDDeviceScheduleWithRunLoop(dev, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+
+    uint8_t req[VIA_REPORT_LEN], resp[VIA_REPORT_LEN];
+    memset(req, 0, sizeof req);
+    req[0] = VIA_CMD_GET_KEYCODE;
+    req[1] = (uint8_t)layer;
+    req[2] = (uint8_t)row;
+    req[3] = (uint8_t)col;
+    if (via_xfer(dev, req, resp) != 0) {
+        fprintf(stderr, "kobu-bootloader: no reply to DynamicKeymapGetKeyCode\n");
+        return 1;
+    }
+    unsigned kc = ((unsigned)resp[4] << 8) | resp[5];   // big-endian (via)
+    char name[64];
+    keycode_str(kc, name, sizeof name);
+    printf("layer %d (%d,%d) = %#06x %s\n", layer, row, col, kc, name);
+    return 0;
+}
+
 static void usage(void) {
     fprintf(stderr,
         "usage: kobu-bootloader [--list] [--dump-combos [N]] [--split-status]\n"
+        "                       [--get-key LAYER ROW COL]\n"
         "                       [--transport usb|ble|any] [--serial SUBSTR]\n"
         "\n"
         "  --list             enumerate kobu2 HID interfaces and exit\n"
         "  --dump-combos [N]  read the live combo table back and exit\n"
+        "  --get-key L R C    read one live keymap position (via keycode) and exit\n"
         "  --split-status     read central/peripheral battery over the central's\n"
         "                     Vial HID; a live peripheral battery proves the BLE\n"
         "                     split link is up. Exits 0 if connected, 2 if not.\n"
@@ -265,6 +307,7 @@ int main(int argc, char **argv) {
     int do_list = 0;
     int do_dump = 0, dump_count = 0;
     int do_split = 0;
+    int do_getkey = 0, gk_layer = 0, gk_row = 0, gk_col = 0;
     const char *want_transport = "usb";
     const char *want_serial = NULL;
 
@@ -276,6 +319,11 @@ int main(int argc, char **argv) {
             if (i + 1 < argc && argv[i + 1][0] != '-') dump_count = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--split-status")) {
             do_split = 1;
+        } else if (!strcmp(argv[i], "--get-key") && i + 3 < argc) {
+            do_getkey = 1;
+            gk_layer = atoi(argv[++i]);
+            gk_row = atoi(argv[++i]);
+            gk_col = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--transport") && i + 1 < argc) {
             want_transport = argv[++i];
         } else if (!strcmp(argv[i], "--serial") && i + 1 < argc) {
@@ -368,6 +416,7 @@ int main(int argc, char **argv) {
 
     if (do_dump) return dump_combos(target, dump_count);
     if (do_split) return split_status(target);
+    if (do_getkey) return get_key(target, gk_layer, gk_row, gk_col);
 
     uint8_t report[VIA_REPORT_LEN];
     memset(report, 0, sizeof report);
