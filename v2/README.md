@@ -79,7 +79,7 @@ scripts/kobu-flash scripts/xiao-nuke.uf2
 scripts/kobu-flash scripts/xiao-nuke.uf2 firmware/rmk/kobu2-rmk-central.uf2
 ```
 
-- 消去範囲は **0x1000–0xF4000**: アプリ + RMK storage（0xA0000–0xC0000 のキーマップ・BLE ボンド・Vial 状態）+ 未使用域（過去に ZMK を焼いた個体の settings 残骸を含む）。MBR（0x0–0x1000）と Adafruit UF2 ブートローダ（0xF4000–）には触れません。
+- 消去範囲は **0x1000–0xC0000**: アプリ + RMK storage（0xA0000–0xC0000 のキーマップ・BLE ボンド・Vial 状態）で、ファームウェアが書き込む領域のすべて。MBR（0x0–0x1000）と Adafruit UF2 ブートローダ（0xF4000–）には触れません。終端を 0xC0000 で止めるのは、出荷版ブートローダ (0.6.1) の UF2 書き込みウィンドウが実測 0x1000–0xEA000 で、ウィンドウ外のブロックは受領カウントされず「全ブロック受領 → 自動リセット」が発火しなくなるため（0xF4000 終端で実害を確認済み。フラッシュ自体は書けるが物理 RESET が必要になる）。なお過去に ZMK を焼いた個体の settings（0xEA000 以降）は UF2 経由では消せないので、必要なら SWD で。
 - 実行コードを含まない「全ブロック 0xFF のデータだけ」の UF2 で、ページ消去はブートローダの書き込みパスが行います。書き込み後は先頭ワードが 0xFFFFFFFF（= 有効なアプリなし）になるため、XIAO は再起動後も自動でブートローダ（XIAO-SENSE ドライブ）に留まり、そのまま次の UF2 を受け付けます。
 - nRF52840 + Adafruit UF2 ブートローダの組み合わせなら v1 の XIAO にもそのまま使えます。
 - キーボード側のボンドは消えますが、**ホスト側（macOS 等）の Bluetooth 設定に残った古いペアリングは別途削除**してください。

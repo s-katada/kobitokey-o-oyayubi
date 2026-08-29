@@ -324,8 +324,8 @@ jobs:
           settings_reset。RMK と同じ要領で RESET 2 連打 → ドラッグ&ドロップ。
 
           ## XIAO 完全消去（flash nuke）
-          \`xiao-nuke.uf2\` は MBR と UF2 ブートローダ以外の全フラッシュ
-          (0x1000–0xF4000: アプリ + RMK storage + 未使用域) を消去済み状態に戻す
+          \`xiao-nuke.uf2\` はファームウェアが書き込む全領域
+          (0x1000–0xC0000: アプリ + RMK storage) を消去済み状態に戻す
           データだけの UF2。焼くと XIAO は本当にまっさら（アプリなし）になり、
           再起動後も自動でブートローダに留まるので続けて任意の UF2 を焼けます。
           v1 / v2 どちらの XIAO にも使用可。詳細は v2/README.md の
