@@ -79,11 +79,28 @@ for f in "$@"; do
     # ignores blocks without the UF2 magic, so they are harmless. Do not expect
     # COPYFILE_DISABLE to suppress them — measured ineffective on this Mac.
     cp "$f" "$vol/" || true   # the volume disappears mid-write on success
-    sync
-    diskutil eject "$vol" >/dev/null 2>&1 || true
-    echo "  flashed; waiting for reboot..."
-    sleep 3
+    sync || true
+
+    # The only proof the bootloader accepted the whole file is that it resets
+    # itself and the volume drops. If it is still mounted after 30 s, the
+    # write-complete never fired (seen 2026-08-29 with a UF2 whose declared
+    # block count exceeded the bootloader's 0x1000-0xEA000 write window:
+    # out-of-window blocks are ignored AND uncounted, so completion never
+    # comes) — bail out loudly instead of flashing the next file into a
+    # stale bootloader session.
+    reset_deadline=$((SECONDS + 30))
+    while [[ -f "$vol/INFO_UF2.TXT" ]]; do
+        if (( SECONDS > reset_deadline )); then
+            echo "kobu-flash: $(basename "$f") was copied but the bootloader never" >&2
+            echo "            auto-reset ($vol is still mounted). Tap RESET once and" >&2
+            echo "            check what is running before flashing anything else." >&2
+            exit 1
+        fi
+        sleep 0.5
+    done
+    echo "  device reset itself; flash accepted."
 done
 
 echo "=== done ==="
+sleep 3
 "$JUMP" --list || true
